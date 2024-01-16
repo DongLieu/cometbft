@@ -218,6 +218,7 @@ func (c *Client) Call(
 	httpResponse, err := c.client.Do(httpRequest)
 	if err != nil {
 		fmt.Println(4444)
+		fmt.Println("post failed:", err)
 		return nil, fmt.Errorf("post failed: %w", err)
 	}
 	defer httpResponse.Body.Close()
