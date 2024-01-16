@@ -192,17 +192,20 @@ func (c *Client) Call(
 
 	request, err := types.MapToRequest(id, method, params)
 	if err != nil {
+		fmt.Println(111)
 		return nil, fmt.Errorf("failed to encode params: %w", err)
 	}
 
 	requestBytes, err := json.Marshal(request)
 	if err != nil {
+		fmt.Println(222)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	requestBuf := bytes.NewBuffer(requestBytes)
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, c.address, requestBuf)
 	if err != nil {
+		fmt.Println(333)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
@@ -214,17 +217,20 @@ func (c *Client) Call(
 
 	httpResponse, err := c.client.Do(httpRequest)
 	if err != nil {
+		fmt.Println(4444)
 		return nil, fmt.Errorf("post failed: %w", err)
 	}
 	defer httpResponse.Body.Close()
 
 	responseBytes, err := io.ReadAll(httpResponse.Body)
 	if err != nil {
+		fmt.Println(555)
 		return nil, fmt.Errorf("%s. Failed to read response body: %w", getHTTPRespErrPrefix(httpResponse), err)
 	}
 
 	res, err := unmarshalResponseBytes(responseBytes, id, result)
 	if err != nil {
+		fmt.Println(666)
 		return nil, fmt.Errorf("%s. %w", getHTTPRespErrPrefix(httpResponse), err)
 	}
 	return res, nil
