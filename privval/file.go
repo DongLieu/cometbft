@@ -206,8 +206,12 @@ func loadFilePV(keyFilePath, stateFilePath string, loadState bool) *FilePV {
 		cmtos.Exit(fmt.Sprintf("Error reading PrivValidator key from %v: %v\n", keyFilePath, err))
 	}
 
+	fmt.Println("===============================================")
+	fmt.Println(pvKey.PubKey)
+	fmt.Println(pvKey.PrivKey.PubKey())
+	fmt.Println("===============================================")
 	// overwrite pubkey and address for convenience
-	pvKey.PubKey = pvKey.PrivKey.PubKey()
+	// pvKey.PubKey = pvKey.PrivKey.PubKey()
 	pvKey.Address = pvKey.PubKey.Address()
 	pvKey.filePath = keyFilePath
 
@@ -356,6 +360,7 @@ func (pv *FilePV) signVote(chainID string, vote *cmtproto.Vote) error {
 	}
 
 	// It passed the checks. Sign the vote
+	fmt.Println("sigggg")
 	sig, err := pv.Key.PrivKey.Sign(signBytes)
 	if err != nil {
 		return err
