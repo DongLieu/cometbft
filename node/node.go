@@ -16,6 +16,7 @@ import (
 	bc "github.com/cometbft/cometbft/blocksync"
 	cfg "github.com/cometbft/cometbft/config"
 	cs "github.com/cometbft/cometbft/consensus"
+	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/evidence"
 	"github.com/cometbft/cometbft/light"
 
@@ -48,9 +49,10 @@ type Node struct {
 	service.BaseService
 
 	// config
-	config        *cfg.Config
-	genesisDoc    *types.GenesisDoc   // initial validator set
-	privValidator types.PrivValidator // local node's validator key
+	config     *cfg.Config
+	genesisDoc *types.GenesisDoc // initial validator set
+	// privValidator types.PrivValidator // local node's validator key
+	pubKey crypto.PubKey
 
 	// network
 	transport   *p2p.MultiplexTransport
@@ -267,7 +269,7 @@ func BootstrapStateWithGenProvider(ctx context.Context, config *cfg.Config, dbPr
 
 // NewNode returns a new, ready to go, CometBFT Node.
 func NewNode(config *cfg.Config,
-	privValidator types.PrivValidator,
+	pubKey crypto.PubKey,
 	nodeKey *p2p.NodeKey,
 	clientCreator proxy.ClientCreator,
 	genesisDocProvider GenesisDocProvider,
@@ -276,7 +278,7 @@ func NewNode(config *cfg.Config,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
-	return NewNodeWithContext(context.TODO(), config, privValidator,
+	return NewNodeWithContext(context.TODO(), config, pubKey,
 		nodeKey, clientCreator, genesisDocProvider, dbProvider,
 		metricsProvider, logger, options...)
 }
@@ -284,7 +286,7 @@ func NewNode(config *cfg.Config,
 // NewNodeWithContext is cancellable version of NewNode.
 func NewNodeWithContext(ctx context.Context,
 	config *cfg.Config,
-	privValidator types.PrivValidator,
+	pubKey crypto.PubKey,
 	nodeKey *p2p.NodeKey,
 	clientCreator proxy.ClientCreator,
 	genesisDocProvider GenesisDocProvider,
@@ -293,6 +295,7 @@ func NewNodeWithContext(ctx context.Context,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
+	fmt.Println("startwwithcontexttttttt")
 	blockStore, stateDB, err := initDBs(config, dbProvider)
 	if err != nil {
 		return nil, err
@@ -332,18 +335,13 @@ func NewNodeWithContext(ctx context.Context,
 
 	// If an address is provided, listen on the socket for a connection from an
 	// external signing process.
-	if config.PrivValidatorListenAddr != "" {
-		// FIXME: we should start services inside OnStart
-		privValidator, err = createAndStartPrivValidatorSocketClient(config.PrivValidatorListenAddr, genDoc.ChainID, logger)
-		if err != nil {
-			return nil, fmt.Errorf("error with private validator socket client: %w", err)
-		}
-	}
-
-	pubKey, err := privValidator.GetPubKey()
-	if err != nil {
-		return nil, fmt.Errorf("can't get pubkey: %w", err)
-	}
+	// if config.PrivValidatorListenAddr != "" {
+	// 	// FIXME: we should start services inside OnStart
+	// 	privValidator, err = createAndStartPrivValidatorSocketClient(config.PrivValidatorListenAddr, genDoc.ChainID, logger)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("error with private validator socket client: %w", err)
+	// 	}
+	// }
 
 	// Determine whether we should attempt state sync.
 	stateSync := config.StateSync.Enable && !onlyValidatorIsUs(state, pubKey)
@@ -408,7 +406,7 @@ func NewNodeWithContext(ctx context.Context,
 
 	consensusReactor, consensusState := createConsensusReactor(
 		config, state, blockExec, blockStore, mempool, evidencePool,
-		privValidator, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
+		pubKey, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
 	)
 
 	err = stateStore.SetOfflineStateSyncHeight(0)
@@ -476,9 +474,10 @@ func NewNodeWithContext(ctx context.Context,
 	addrBook.AddPrivateIDs(splitAndTrimEmpty(config.P2P.PrivatePeerIDs, ",", " "))
 
 	node := &Node{
-		config:        config,
-		genesisDoc:    genDoc,
-		privValidator: privValidator,
+		config:     config,
+		genesisDoc: genDoc,
+		// privValidator: privValidator,
+		pubKey: pubKey,
 
 		transport: transport,
 		sw:        sw,
@@ -614,11 +613,11 @@ func (n *Node) OnStop() {
 		}
 	}
 
-	if pvsc, ok := n.privValidator.(service.Service); ok {
-		if err := pvsc.Stop(); err != nil {
-			n.Logger.Error("Error closing private validator", "err", err)
-		}
-	}
+	// if pvsc, ok := n.privValidator.(service.Service); ok {
+	// 	if err := pvsc.Stop(); err != nil {
+	// 		n.Logger.Error("Error closing private validator", "err", err)
+	// 	}
+	// }
 
 	if n.prometheusSrv != nil {
 		if err := n.prometheusSrv.Shutdown(context.Background()); err != nil {
@@ -653,10 +652,10 @@ func (n *Node) OnStop() {
 
 // ConfigureRPC makes sure RPC has all the objects it needs to operate.
 func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
-	pubKey, err := n.privValidator.GetPubKey()
-	if pubKey == nil || err != nil {
-		return nil, fmt.Errorf("can't get pubkey: %w", err)
-	}
+	// pubKey, err := n.privValidator.GetPubKey()
+	// if pubKey == nil || err != nil {
+	// 	return nil, fmt.Errorf("can't get pubkey: %w", err)
+	// }
 	rpcCoreEnv := rpccore.Environment{
 		ProxyAppQuery:   n.proxyApp.Query(),
 		ProxyAppMempool: n.proxyApp.Mempool(),
@@ -667,7 +666,7 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		ConsensusState: n.consensusState,
 		P2PPeers:       n.sw,
 		P2PTransport:   n,
-		PubKey:         pubKey,
+		PubKey:         n.nodeKey.PubKey(),
 
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,
@@ -887,9 +886,9 @@ func (n *Node) EventBus() *types.EventBus {
 
 // PrivValidator returns the Node's PrivValidator.
 // XXX: for convenience only!
-func (n *Node) PrivValidator() types.PrivValidator {
-	return n.privValidator
-}
+// func (n *Node) PrivValidator() types.PrivValidator {
+// 	return n.privValidator
+// }
 
 // GenesisDoc returns the Node's GenesisDoc.
 func (n *Node) GenesisDoc() *types.GenesisDoc {

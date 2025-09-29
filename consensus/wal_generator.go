@@ -88,7 +88,7 @@ func WALGenerateNBlocks(t *testing.T, wr io.Writer, numBlocks int, config *cfg.C
 	consensusState.SetLogger(logger)
 	consensusState.SetEventBus(eventBus)
 	if privValidator != nil {
-		consensusState.SetPrivValidator(privValidator)
+		consensusState.SetPrivValidator(privValidator.Key.PubKey)
 	}
 	// END OF COPY PASTE
 

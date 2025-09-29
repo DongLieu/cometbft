@@ -68,7 +68,7 @@ func DefaultNewNode(config *cfg.Config, logger log.Logger) (*Node, error) {
 	}
 
 	return NewNode(config,
-		privval.LoadOrGenFilePV(config.PrivValidatorKeyFile(), config.PrivValidatorStateFile()),
+		privval.LoadOrGenFilePV(config.PrivValidatorKeyFile(), config.PrivValidatorStateFile()).Key.PubKey,
 		nodeKey,
 		proxy.DefaultClientCreator(config.ProxyApp, config.ABCI, config.DBDir()),
 		DefaultGenesisDocProviderFunc(config),
@@ -305,7 +305,7 @@ func createConsensusReactor(config *cfg.Config,
 	blockStore sm.BlockStore,
 	mempool mempl.Mempool,
 	evidencePool *evidence.Pool,
-	privValidator types.PrivValidator,
+	pub crypto.PubKey,
 	csMetrics *cs.Metrics,
 	waitSync bool,
 	eventBus *types.EventBus,
@@ -323,8 +323,8 @@ func createConsensusReactor(config *cfg.Config,
 		cs.OfflineStateSyncHeight(offlineStateSyncHeight),
 	)
 	consensusState.SetLogger(consensusLogger)
-	if privValidator != nil {
-		consensusState.SetPrivValidator(privValidator)
+	if pub != nil {
+		consensusState.SetPrivValidator(pub)
 	}
 	consensusReactor := cs.NewReactor(consensusState, waitSync, cs.ReactorMetrics(csMetrics))
 	consensusReactor.SetLogger(consensusLogger)

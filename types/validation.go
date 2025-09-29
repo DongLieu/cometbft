@@ -410,9 +410,9 @@ func verifyBasicValsAndCommit(vals *ValidatorSet, commit *Commit, height int64, 
 		return errors.New("nil commit")
 	}
 
-	if vals.Size() != len(commit.Signatures) {
-		return NewErrInvalidCommitSignatures(vals.Size(), len(commit.Signatures))
-	}
+	// if vals.Size() != len(commit.Signatures) {
+	// 	return NewErrInvalidCommitSignatures(vals.Size(), len(commit.Signatures))
+	// }
 
 	// Validate Height and BlockID.
 	if height != commit.Height {

@@ -82,6 +82,7 @@ func validateBlock(state State, block *types.Block) error {
 		)
 	}
 
+	fmt.Println("222229999")
 	// Validate block LastCommit.
 	if block.Height == state.InitialHeight {
 		if len(block.LastCommit.Signatures) != 0 {
@@ -89,11 +90,12 @@ func validateBlock(state State, block *types.Block) error {
 		}
 	} else {
 		// LastCommit.Signatures length is checked in VerifyCommit.
-		if err := state.LastValidators.VerifyCommit(
-			state.ChainID, state.LastBlockID, block.Height-1, block.LastCommit); err != nil {
-			return err
-		}
+		// if err := state.LastValidators.VerifyCommit(
+		// 	state.ChainID, state.LastBlockID, block.Height-1, block.LastCommit); err != nil {
+		// 	return err
+		// }
 	}
+	fmt.Println("33339999")
 
 	// NOTE: We can't actually verify it's the right proposer because we don't
 	// know what round the block was first proposed. So just check that it's
