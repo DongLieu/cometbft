@@ -23,7 +23,7 @@ var (
 	ErrVoteUnexpectedStep            = errors.New("unexpected step")
 	ErrVoteInvalidValidatorIndex     = errors.New("invalid validator index")
 	ErrVoteInvalidValidatorAddress   = errors.New("invalid validator address")
-	ErrVoteInvalidSignature          = errors.New("invalid signature")
+	ErrVoteInvalidSignature          = errors.New("invalid signature voteeeeee")
 	ErrVoteInvalidBlockHash          = errors.New("invalid block hash")
 	ErrVoteNonDeterministicSignature = errors.New("non-deterministic signature")
 	ErrVoteNil                       = errors.New("nil vote")
