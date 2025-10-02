@@ -559,7 +559,7 @@ func NewErrInvalidEvidence(ev Evidence, err error) *ErrInvalidEvidence {
 
 // Error returns a string representation of the error.
 func (err *ErrInvalidEvidence) Error() string {
-	return fmt.Sprintf("Invalid evidence: %v. Evidence: %v", err.Reason, err.Evidence)
+	return fmt.Sprintf("Invalid evidence 3333: %v. Evidence: %v", err.Reason, err.Evidence)
 }
 
 // ErrEvidenceOverflow is for when there the amount of evidence exceeds the max bytes.
