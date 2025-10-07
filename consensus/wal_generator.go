@@ -1,26 +1,15 @@
 package consensus
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
-	"path/filepath"
 	"testing"
 	"time"
 
-	db "github.com/cometbft/cometbft-db"
-
-	"github.com/cometbft/cometbft/abci/example/kvstore"
 	cfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/internal/test"
 	"github.com/cometbft/cometbft/libs/log"
 	cmtrand "github.com/cometbft/cometbft/libs/rand"
-	"github.com/cometbft/cometbft/privval"
-	"github.com/cometbft/cometbft/proxy"
-	sm "github.com/cometbft/cometbft/state"
-	"github.com/cometbft/cometbft/store"
-	"github.com/cometbft/cometbft/types"
 )
 
 // WALGenerateNBlocks generates a consensus WAL. It does this by spinning up a
@@ -28,110 +17,111 @@ import (
 // persistent kvstore application and special consensus wal instance
 // (byteBufferWAL) and waits until numBlocks are created.
 // If the node fails to produce given numBlocks, it returns an error.
-func WALGenerateNBlocks(t *testing.T, wr io.Writer, numBlocks int, config *cfg.Config) (err error) {
-	app := kvstore.NewPersistentApplication(filepath.Join(config.DBDir(), "wal_generator"))
+// func WALGenerateNBlocks(t *testing.T, wr io.Writer, numBlocks int, config *cfg.Config) (err error) {
+// 	app := kvstore.NewPersistentApplication(filepath.Join(config.DBDir(), "wal_generator"))
 
-	logger := log.TestingLogger().With("wal_generator", "wal_generator")
-	logger.Info("generating WAL (last height msg excluded)", "numBlocks", numBlocks)
+// 	logger := log.TestingLogger().With("wal_generator", "wal_generator")
+// 	logger.Info("generating WAL (last height msg excluded)", "numBlocks", numBlocks)
 
-	// COPY PASTE FROM node.go WITH A FEW MODIFICATIONS
-	// NOTE: we can't import node package because of circular dependency.
-	// NOTE: we don't do handshake so need to set state.Version.Consensus.App directly.
-	privValidatorKeyFile := config.PrivValidatorKeyFile()
-	privValidatorStateFile := config.PrivValidatorStateFile()
-	privValidator := privval.LoadOrGenFilePV(privValidatorKeyFile, privValidatorStateFile)
-	genDoc, err := types.GenesisDocFromFile(config.GenesisFile())
-	if err != nil {
-		return fmt.Errorf("failed to read genesis file: %w", err)
-	}
-	blockStoreDB := db.NewMemDB()
-	stateDB := blockStoreDB
-	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
-		DiscardABCIResponses: false,
-	})
-	state, err := sm.MakeGenesisState(genDoc)
-	if err != nil {
-		return fmt.Errorf("failed to make genesis state: %w", err)
-	}
-	state.Version.Consensus.App = kvstore.AppVersion
-	if err = stateStore.Save(state); err != nil {
-		t.Error(err)
-	}
+// 	// COPY PASTE FROM node.go WITH A FEW MODIFICATIONS
+// 	// NOTE: we can't import node package because of circular dependency.
+// 	// NOTE: we don't do handshake so need to set state.Version.Consensus.App directly.
+// 	privValidatorKeyFile := config.PrivValidatorKeyFile()
+// 	privValidatorStateFile := config.PrivValidatorStateFile()
+// 	privValidator := privval.LoadOrGenFilePV(privValidatorKeyFile, privValidatorStateFile)
+// 	genDoc, err := types.GenesisDocFromFile(config.GenesisFile())
+// 	if err != nil {
+// 		return fmt.Errorf("failed to read genesis file: %w", err)
+// 	}
+// 	blockStoreDB := db.NewMemDB()
+// 	stateDB := blockStoreDB
+// 	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
+// 		DiscardABCIResponses: false,
+// 	})
+// 	state, err := sm.MakeGenesisState(genDoc)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to make genesis state: %w", err)
+// 	}
+// 	state.Version.Consensus.App = kvstore.AppVersion
+// 	if err = stateStore.Save(state); err != nil {
+// 		t.Error(err)
+// 	}
 
-	blockStore := store.NewBlockStore(blockStoreDB)
+// 	blockStore := store.NewBlockStore(blockStoreDB)
 
-	proxyApp := proxy.NewAppConns(proxy.NewLocalClientCreator(app), proxy.NopMetrics())
-	proxyApp.SetLogger(logger.With("module", "proxy"))
-	if err := proxyApp.Start(); err != nil {
-		return fmt.Errorf("failed to start proxy app connections: %w", err)
-	}
-	t.Cleanup(func() {
-		if err := proxyApp.Stop(); err != nil {
-			t.Error(err)
-		}
-	})
+// 	proxyApp := proxy.NewAppConns(proxy.NewLocalClientCreator(app), proxy.NopMetrics())
+// 	proxyApp.SetLogger(logger.With("module", "proxy"))
+// 	if err := proxyApp.Start(); err != nil {
+// 		return fmt.Errorf("failed to start proxy app connections: %w", err)
+// 	}
+// 	t.Cleanup(func() {
+// 		if err := proxyApp.Stop(); err != nil {
+// 			t.Error(err)
+// 		}
+// 	})
 
-	eventBus := types.NewEventBus()
-	eventBus.SetLogger(logger.With("module", "events"))
-	if err := eventBus.Start(); err != nil {
-		return fmt.Errorf("failed to start event bus: %w", err)
-	}
-	t.Cleanup(func() {
-		if err := eventBus.Stop(); err != nil {
-			t.Error(err)
-		}
-	})
-	mempool := emptyMempool{}
-	evpool := sm.EmptyEvidencePool{}
-	blockExec := sm.NewBlockExecutor(stateStore, log.TestingLogger(), proxyApp.Consensus(), mempool, evpool, blockStore)
-	consensusState := NewState(config.Consensus, state.Copy(), blockExec, blockStore, mempool, evpool)
-	consensusState.SetLogger(logger)
-	consensusState.SetEventBus(eventBus)
-	if privValidator != nil {
-		consensusState.SetPrivValidator(privValidator.Key.PubKey)
-	}
-	// END OF COPY PASTE
+// 	eventBus := types.NewEventBus()
+// 	eventBus.SetLogger(logger.With("module", "events"))
+// 	if err := eventBus.Start(); err != nil {
+// 		return fmt.Errorf("failed to start event bus: %w", err)
+// 	}
+// 	t.Cleanup(func() {
+// 		if err := eventBus.Stop(); err != nil {
+// 			t.Error(err)
+// 		}
+// 	})
+// 	mempool := emptyMempool{}
+// 	evpool := sm.EmptyEvidencePool{}
+// 	blockExec := sm.NewBlockExecutor(stateStore, log.TestingLogger(), proxyApp.Consensus(), mempool, evpool, blockStore)
+// 	consensusState := NewState(config.Consensus, state.Copy(), blockExec, blockStore, mempool, evpool)
+// 	consensusState.SetLogger(logger)
+// 	consensusState.SetEventBus(eventBus)
+// 	if privValidator != nil {
+// 		consensusState.SetPrivValidator(privValidator.Key.PubKey)
+// 	}
+// 	// END OF COPY PASTE
 
-	// set consensus wal to buffered WAL, which will write all incoming msgs to buffer
-	numBlocksWritten := make(chan struct{})
-	wal := newByteBufferWAL(logger, NewWALEncoder(wr), int64(numBlocks), numBlocksWritten)
-	// see wal.go#103
-	if err := wal.Write(EndHeightMessage{0}); err != nil {
-		t.Error(err)
-	}
+// 	// set consensus wal to buffered WAL, which will write all incoming msgs to buffer
+// 	numBlocksWritten := make(chan struct{})
+// 	wal := newByteBufferWAL(logger, NewWALEncoder(wr), int64(numBlocks), numBlocksWritten)
+// 	// see wal.go#103
+// 	if err := wal.Write(EndHeightMessage{0}); err != nil {
+// 		t.Error(err)
+// 	}
 
-	consensusState.wal = wal
+// 	consensusState.wal = wal
 
-	if err := consensusState.Start(); err != nil {
-		return fmt.Errorf("failed to start consensus state: %w", err)
-	}
+// 	fmt.Println("-----consensus start")
+// 	if err := consensusState.Start(); err != nil {
+// 		return fmt.Errorf("failed to start consensus state: %w", err)
+// 	}
 
-	select {
-	case <-numBlocksWritten:
-		if err := consensusState.Stop(); err != nil {
-			t.Error(err)
-		}
-		return nil
-	case <-time.After(1 * time.Minute):
-		if err := consensusState.Stop(); err != nil {
-			t.Error(err)
-		}
-		return fmt.Errorf("waited too long for CometBFT to produce %d blocks (grep logs for `wal_generator`)", numBlocks)
-	}
-}
+// 	select {
+// 	case <-numBlocksWritten:
+// 		if err := consensusState.Stop(); err != nil {
+// 			t.Error(err)
+// 		}
+// 		return nil
+// 	case <-time.After(1 * time.Minute):
+// 		if err := consensusState.Stop(); err != nil {
+// 			t.Error(err)
+// 		}
+// 		return fmt.Errorf("waited too long for CometBFT to produce %d blocks (grep logs for `wal_generator`)", numBlocks)
+// 	}
+// }
 
 // WALWithNBlocks returns a WAL content with numBlocks.
-func WALWithNBlocks(t *testing.T, numBlocks int, config *cfg.Config) (data []byte, err error) {
-	var b bytes.Buffer
-	wr := bufio.NewWriter(&b)
+// func WALWithNBlocks(t *testing.T, numBlocks int, config *cfg.Config) (data []byte, err error) {
+// 	var b bytes.Buffer
+// 	wr := bufio.NewWriter(&b)
 
-	if err := WALGenerateNBlocks(t, wr, numBlocks, config); err != nil {
-		return []byte{}, err
-	}
+// 	if err := WALGenerateNBlocks(t, wr, numBlocks, config); err != nil {
+// 		return []byte{}, err
+// 	}
 
-	wr.Flush()
-	return b.Bytes(), nil
-}
+// 	wr.Flush()
+// 	return b.Bytes(), nil
+// }
 
 func randPort() int {
 	// returns between base and base + spread

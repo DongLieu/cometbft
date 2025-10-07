@@ -202,6 +202,7 @@ func NewState(
 
 	// NOTE: we do not call scheduleRound0 yet, we do that upon Start()
 
+	// init state
 	cs.BaseService = *service.NewBaseService(nil, "State", cs)
 
 	return cs
@@ -324,6 +325,7 @@ func (cs *State) OnStart() error {
 	// We may set the WAL in testing before calling Start, so only OpenWAL if its
 	// still the nilWAL.
 	if _, ok := cs.wal.(nilWAL); ok {
+		// load, start goup, wal
 		if err := cs.loadWalFile(); err != nil {
 			return err
 		}
@@ -384,12 +386,14 @@ func (cs *State) OnStart() error {
 			cs.Logger.Info("successful WAL repair")
 
 			// reload WAL file
+			// load, start goup, wal
 			if err := cs.loadWalFile(); err != nil {
 				return err
 			}
 		}
 	}
 
+	fmt.Println("-----start event sw consensus")
 	if err := cs.evsw.Start(); err != nil {
 		return err
 	}
@@ -463,6 +467,7 @@ func (cs *State) OpenWAL(walFile string) (WAL, error) {
 
 	wal.SetLogger(cs.Logger.With("wal", walFile))
 
+	fmt.Println("------start wal consensus")
 	if err := wal.Start(); err != nil {
 		cs.Logger.Error("failed to start WAL", "err", err)
 		return nil, err

@@ -233,6 +233,7 @@ func (sw *Switch) SetNodeKey(nodeKey *NodeKey) {
 // OnStart implements BaseService. It starts all the reactors and peers.
 func (sw *Switch) OnStart() error {
 	// Start reactors
+	// start mempool, syc state....
 	for _, reactor := range sw.reactors {
 		err := reactor.Start()
 		if err != nil {
@@ -242,7 +243,7 @@ func (sw *Switch) OnStart() error {
 
 	// Start accepting Peers.
 	go sw.acceptRoutine()
-
+	fmt.Println("fullll")
 	return nil
 }
 
@@ -409,6 +410,8 @@ func (sw *Switch) reconnectToPeer(addr *NetAddress) {
 			return
 		}
 
+		// state
+		fmt.Println("--------dialPeersAsync 2")
 		err := sw.DialPeerWithAddress(addr)
 		if err == nil {
 			return // success
@@ -433,6 +436,7 @@ func (sw *Switch) reconnectToPeer(addr *NetAddress) {
 		sleepIntervalSeconds := math.Pow(reconnectBackOffBaseSeconds, float64(i))
 		sw.randomSleep(time.Duration(sleepIntervalSeconds) * time.Second)
 
+		fmt.Println("--------dialPeersAsync 3")
 		err := sw.DialPeerWithAddress(addr)
 		if err == nil {
 			return // success
@@ -492,6 +496,8 @@ func (sw *Switch) DialPeersAsync(peers []string) error {
 }
 
 func (sw *Switch) dialPeersAsync(netAddrs []*NetAddress) {
+	// Peer
+	fmt.Println("--------dialPeersAsync 1")
 	ourAddr := sw.NetAddress()
 
 	// TODO: this code feels like it's in the wrong place.
@@ -737,6 +743,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 		return fmt.Errorf("dial err (peerConfig.DialFail == true)")
 	}
 
+	// call dial
 	p, err := sw.transport.Dial(*addr, peerConfig{
 		chDescs:       sw.chDescs,
 		onPeerError:   sw.StopPeerForError,

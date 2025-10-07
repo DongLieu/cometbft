@@ -192,6 +192,7 @@ func (mt *MultiplexTransport) NetAddress() NetAddress {
 
 // Accept implements Transport.
 func (mt *MultiplexTransport) Accept(cfg peerConfig) (Peer, error) {
+	fmt.Println("------Accept")
 	select {
 	// This case should never have any side-effectful/blocking operations to
 	// ensure that quality peers are ready to be used.
@@ -213,6 +214,7 @@ func (mt *MultiplexTransport) Dial(
 	addr NetAddress,
 	cfg peerConfig,
 ) (Peer, error) {
+	fmt.Println("------Dial")
 	c, err := addr.DialTimeout(mt.dialTimeout)
 	if err != nil {
 		return nil, err

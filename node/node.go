@@ -101,33 +101,33 @@ type Option func(*Node)
 //   - EVIDENCE
 //   - PEX
 //   - STATESYNC
-func CustomReactors(reactors map[string]p2p.Reactor) Option {
-	return func(n *Node) {
-		for name, reactor := range reactors {
-			if existingReactor := n.sw.Reactor(name); existingReactor != nil {
-				n.sw.Logger.Info("Replacing existing reactor with a custom one",
-					"name", name, "existing", existingReactor, "custom", reactor)
-				n.sw.RemoveReactor(name, existingReactor)
-			}
-			n.sw.AddReactor(name, reactor)
-			// register the new channels to the nodeInfo
-			// NOTE: This is a bit messy now with the type casting but is
-			// cleaned up in the following version when NodeInfo is changed from
-			// and interface to a concrete type
-			if ni, ok := n.nodeInfo.(p2p.DefaultNodeInfo); ok {
-				for _, chDesc := range reactor.GetChannels() {
-					if !ni.HasChannel(chDesc.ID) {
-						ni.Channels = append(ni.Channels, chDesc.ID)
-						n.transport.AddChannel(chDesc.ID)
-					}
-				}
-				n.nodeInfo = ni
-			} else {
-				n.Logger.Error("Node info is not of type DefaultNodeInfo. Custom reactor channels can not be added.")
-			}
-		}
-	}
-}
+// func CustomReactors(reactors map[string]p2p.Reactor) Option {
+// 	return func(n *Node) {
+// 		for name, reactor := range reactors {
+// 			if existingReactor := n.sw.Reactor(name); existingReactor != nil {
+// 				n.sw.Logger.Info("Replacing existing reactor with a custom one",
+// 					"name", name, "existing", existingReactor, "custom", reactor)
+// 				n.sw.RemoveReactor(name, existingReactor)
+// 			}
+// 			n.sw.AddReactor(name, reactor)
+// 			// register the new channels to the nodeInfo
+// 			// NOTE: This is a bit messy now with the type casting but is
+// 			// cleaned up in the following version when NodeInfo is changed from
+// 			// and interface to a concrete type
+// 			if ni, ok := n.nodeInfo.(p2p.DefaultNodeInfo); ok {
+// 				for _, chDesc := range reactor.GetChannels() {
+// 					if !ni.HasChannel(chDesc.ID) {
+// 						ni.Channels = append(ni.Channels, chDesc.ID)
+// 						n.transport.AddChannel(chDesc.ID)
+// 					}
+// 				}
+// 				n.nodeInfo = ni
+// 			} else {
+// 				n.Logger.Error("Node info is not of type DefaultNodeInfo. Custom reactor channels can not be added.")
+// 			}
+// 		}
+// 	}
+// }
 
 // StateProvider overrides the state provider used by state sync to retrieve trusted app hashes and
 // build a State object for bootstrapping the node.
@@ -313,6 +313,8 @@ func NewNodeWithContext(ctx context.Context,
 	csMetrics, p2pMetrics, memplMetrics, smMetrics, abciMetrics, bsMetrics, ssMetrics := metricsProvider(genDoc.ChainID)
 
 	// Create the proxyApp and establish connections to the ABCI app (consensus, mempool, query).
+	// start mul
+	fmt.Println("-------start multiAppConn")
 	proxyApp, err := createAndStartProxyAppConns(clientCreator, logger, abciMetrics)
 	if err != nil {
 		return nil, err
@@ -322,11 +324,13 @@ func NewNodeWithContext(ctx context.Context,
 	// we might need to index the txs of the replayed block as this might not have happened
 	// when the node stopped last time (i.e. the node stopped after it saved the block
 	// but before it indexed the txs)
+	fmt.Println("-------start eventBus")
 	eventBus, err := createAndStartEventBus(logger)
 	if err != nil {
 		return nil, err
 	}
 
+	fmt.Println("-------start indexerService")
 	indexerService, txIndexer, blockIndexer, err := createAndStartIndexerService(config,
 		genDoc.ChainID, dbProvider, eventBus, logger)
 	if err != nil {
@@ -373,8 +377,10 @@ func NewNodeWithContext(ctx context.Context,
 
 	logNodeStartupInfo(state, pubKey, logger, consensusLogger)
 
+	fmt.Println("-------init Mempool")
 	mempool, mempoolReactor := createMempoolAndMempoolReactor(config, proxyApp, state, memplMetrics, logger)
 
+	fmt.Println("-------start Evidence")
 	evidenceReactor, evidencePool, err := createEvidenceReactor(config, dbProvider, stateStore, blockStore, logger)
 	if err != nil {
 		return nil, err
@@ -399,11 +405,13 @@ func NewNodeWithContext(ctx context.Context,
 		}
 	}
 	// Don't start block sync if we're doing a state sync first.
+	fmt.Println("-------start blockExec")
 	bcReactor, err := createBlocksyncReactor(config, state, blockExec, blockStore, blockSync && !stateSync, logger, bsMetrics, offlineStateSyncHeight)
 	if err != nil {
 		return nil, fmt.Errorf("could not create blocksync reactor: %w", err)
 	}
 
+	fmt.Println("-------start consensusReactor")
 	consensusReactor, consensusState := createConsensusReactor(
 		config, state, blockExec, blockStore, mempool, evidencePool,
 		pubKey, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
@@ -430,6 +438,7 @@ func NewNodeWithContext(ctx context.Context,
 		return nil, err
 	}
 
+	fmt.Println("-------start transport")
 	transport, peerFilters := createTransport(config, nodeInfo, nodeKey, proxyApp)
 
 	p2pLogger := logger.With("module", "p2p")
@@ -448,6 +457,7 @@ func NewNodeWithContext(ctx context.Context,
 		return nil, fmt.Errorf("could not add peer ids from unconditional_peer_ids field: %w", err)
 	}
 
+	fmt.Println("-------start addrBook")
 	addrBook, err := createAddrBookAndSetOnSwitch(config, sw, p2pLogger, nodeKey)
 	if err != nil {
 		return nil, fmt.Errorf("could not create addrbook: %w", err)
@@ -465,6 +475,7 @@ func NewNodeWithContext(ctx context.Context,
 	//
 	// If PEX is on, it should handle dialing the seeds. Otherwise the switch does it.
 	// Note we currently use the addrBook regardless at least for AddOurAddress
+	fmt.Println("-------start pexReactor")
 	var pexReactor *pex.Reactor
 	if config.P2P.PexReactor {
 		pexReactor = createPEXReactorAndAddToSwitch(addrBook, config, sw, logger)
@@ -509,11 +520,13 @@ func NewNodeWithContext(ctx context.Context,
 		option(node)
 	}
 
+	fmt.Println("-------start node")
 	return node, nil
 }
 
 // OnStart starts the Node. It implements service.Service.
 func (n *Node) OnStart() error {
+	fmt.Println("startttttttt 5")
 	now := cmttime.Now()
 	genTime := n.genesisDoc.GenesisTime
 	if genTime.After(now) {
@@ -522,6 +535,7 @@ func (n *Node) OnStart() error {
 	}
 
 	// run pprof server if it is enabled
+	fmt.Println("-------start p2p pprofSrv")
 	if n.config.RPC.IsPprofEnabled() {
 		n.pprofSrv = n.startPprofServer()
 	}
@@ -542,6 +556,7 @@ func (n *Node) OnStart() error {
 	}
 
 	// Start the transport.
+	fmt.Println("-------start p2p transport")
 	addr, err := p2p.NewNetAddressString(p2p.IDAddressString(n.nodeKey.ID(), n.config.P2P.ListenAddress))
 	if err != nil {
 		return err
@@ -553,23 +568,26 @@ func (n *Node) OnStart() error {
 	n.isListening = true
 
 	// Start the switch (the P2P server).
+	fmt.Println("-------start p2p switch")
 	err = n.sw.Start()
 	if err != nil {
 		return err
 	}
-
+	fmt.Println("-------start p2p switch1.5")
 	// Always connect to persistent peers
 	err = n.sw.DialPeersAsync(splitAndTrimEmpty(n.config.P2P.PersistentPeers, ",", " "))
 	if err != nil {
 		return fmt.Errorf("could not dial peers from persistent_peers field: %w", err)
 	}
 
+	fmt.Println("-------start p2p switch2")
 	// Run state sync
 	if n.stateSync {
 		bcR, ok := n.bcReactor.(blockSyncReactor)
 		if !ok {
 			return fmt.Errorf("this blocksync reactor does not support switching from state sync")
 		}
+		fmt.Println("-------start startStateSync")
 		err := startStateSync(n.stateSyncReactor, bcR, n.stateSyncProvider,
 			n.config.StateSync, n.stateStore, n.blockStore, n.stateSyncGenesis)
 		if err != nil {
@@ -686,6 +704,7 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 }
 
 func (n *Node) startRPC() ([]net.Listener, error) {
+	fmt.Println("startttttttt 2")
 	env, err := n.ConfigureRPC()
 	if err != nil {
 		return nil, err
@@ -803,12 +822,14 @@ func (n *Node) startRPC() ([]net.Listener, error) {
 
 	}
 
+	fmt.Println("startttttttt 2 end")
 	return listeners, nil
 }
 
 // startPrometheusServer starts a Prometheus HTTP server, listening for metrics
 // collectors on addr.
 func (n *Node) startPrometheusServer() *http.Server {
+	fmt.Println("startttttttt 3")
 	srv := &http.Server{
 		Addr: n.config.Instrumentation.PrometheusListenAddr,
 		Handler: promhttp.InstrumentMetricHandler(
@@ -830,6 +851,7 @@ func (n *Node) startPrometheusServer() *http.Server {
 
 // starts a ppro
 func (n *Node) startPprofServer() *http.Server {
+	fmt.Println("startttttttt 4")
 	srv := &http.Server{
 		Addr:              n.config.RPC.PprofListenAddress,
 		Handler:           nil,
