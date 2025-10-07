@@ -2,6 +2,8 @@ package privval
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -234,6 +236,58 @@ func loadFilePV(keyFilePath, stateFilePath string, loadState bool) *FilePV {
 		Key:           pvKey,
 		LastSignState: pvState,
 	}
+}
+
+func LoadFilePVsFromPubkeysJSON(filePath string) ([]*FilePV, error) {
+	type pubKeysFile struct {
+		BlockHeight string `json:"block_height"`
+		Validators  []struct {
+			Address string `json:"address"`
+			PubKey  struct {
+				Type string `json:"@type"`
+				Key  string `json:"key"`
+			} `json:"pub_key"`
+			VotingPower      string `json:"voting_power"`
+			ProposerPriority string `json:"proposer_priority"`
+		} `json:"validators"`
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	var parsed pubKeysFile
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	var filePVs []*FilePV
+	for _, v := range parsed.Validators {
+		pubKeyBytes, err := base64.StdEncoding.DecodeString(v.PubKey.Key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode pubkey for %s: %w", v.Address, err)
+		}
+
+		// Tạo pubkey dạng ed25519 của CometBFT
+		var pk ed25519.PubKey = pubKeyBytes
+
+		// Tạo FilePVKey (chỉ có PubKey, vì không có private key trong file pubkeys.json)
+		pvKey := FilePVKey{
+			PubKey:  pk,
+			Address: pk.Address(),
+		}
+
+		// State để trống, vì không có thông tin ký
+		pvState := FilePVLastSignState{}
+
+		filePVs = append(filePVs, &FilePV{
+			Key:           pvKey,
+			LastSignState: pvState,
+		})
+	}
+
+	return filePVs, nil
 }
 
 // LoadOrGenFilePV loads a FilePV from the given filePaths

@@ -1,0 +1,45 @@
+{
+    "block_height": "16",
+    "validators": [
+        {
+            "address": "onomyvalcons1gzxv75me0j22ses2cwmz3xa709smsrmpmhly9v",
+            "pub_key": {
+                "@type": "/cosmos.crypto.ed25519.PubKey",
+                "key": "ej/haVDGAsWKsiz8uPWBRtAjbsLdP3W635mroj93KUY="
+            },
+            "voting_power": "1000",
+            "proposer_priority": "0"
+        },
+        {
+            "address": "onomyvalcons1tcwv7jlkh95hgk86hxy7t34dp8cunxnz9845k2",
+            "pub_key": {
+                "@type": "/cosmos.crypto.ed25519.PubKey",
+                "key": "ZNQEBiaZd2ZuzB7u0teefdtvW/k+qKuq80/gS5PtGoA="
+            },
+            "voting_power": "1000",
+            "proposer_priority": "0"
+        },
+        {
+            "address": "onomyvalcons1upes8lxcvrpdvllg442s6u38c0zjqpk5tf562x",
+            "pub_key": {
+                "@type": "/cosmos.crypto.ed25519.PubKey",
+                "key": "BllwM+IFvzNkkOx8JzVQ4QPOBp9Z6Y011PFBnmViadM="
+            },
+            "voting_power": "1000",
+            "proposer_priority": "0"
+        },
+        {
+            "address": "onomyvalcons1a47h8at4jdxy87yr65eskxtqjvxnsrc9qmtvdg",
+            "pub_key": {
+                "@type": "/cosmos.crypto.ed25519.PubKey",
+                "key": "XhNBO2mYyOjVyAFkebfxbyK+TmT3qRmu7Z1CyDsOpBw="
+            },
+            "voting_power": "1000",
+            "proposer_priority": "0"
+        }
+    ],
+    "pagination": {
+        "next_key": null,
+        "total": "4"
+    }
+}

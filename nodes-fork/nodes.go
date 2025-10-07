@@ -1,4 +1,4 @@
-package node
+package nodes_fork
 
 import (
 	"bytes"
@@ -45,14 +45,18 @@ import (
 
 // Node is the highest level interface to a full CometBFT node.
 // It includes all configuration information and running services.
+
+type currentNode struct {
+	pubKey crypto.PubKey
+}
+
 type Node struct {
 	service.BaseService
+	current_node currentNode
 
 	// config
 	config     *cfg.Config
 	genesisDoc *types.GenesisDoc // initial validator set
-	// privValidator types.PrivValidator // local node's validator key
-	pubKey crypto.PubKey
 
 	// network
 	transport   *p2p.MultiplexTransport
@@ -88,46 +92,6 @@ type Node struct {
 
 // Option sets a parameter for the node.
 type Option func(*Node)
-
-// CustomReactors allows you to add custom reactors (name -> p2p.Reactor) to
-// the node's Switch.
-//
-// WARNING: using any name from the below list of the existing reactors will
-// result in replacing it with the custom one.
-//
-//   - MEMPOOL
-//   - BLOCKSYNC
-//   - CONSENSUS
-//   - EVIDENCE
-//   - PEX
-//   - STATESYNC
-// func CustomReactors(reactors map[string]p2p.Reactor) Option {
-// 	return func(n *Node) {
-// 		for name, reactor := range reactors {
-// 			if existingReactor := n.sw.Reactor(name); existingReactor != nil {
-// 				n.sw.Logger.Info("Replacing existing reactor with a custom one",
-// 					"name", name, "existing", existingReactor, "custom", reactor)
-// 				n.sw.RemoveReactor(name, existingReactor)
-// 			}
-// 			n.sw.AddReactor(name, reactor)
-// 			// register the new channels to the nodeInfo
-// 			// NOTE: This is a bit messy now with the type casting but is
-// 			// cleaned up in the following version when NodeInfo is changed from
-// 			// and interface to a concrete type
-// 			if ni, ok := n.nodeInfo.(p2p.DefaultNodeInfo); ok {
-// 				for _, chDesc := range reactor.GetChannels() {
-// 					if !ni.HasChannel(chDesc.ID) {
-// 						ni.Channels = append(ni.Channels, chDesc.ID)
-// 						n.transport.AddChannel(chDesc.ID)
-// 					}
-// 				}
-// 				n.nodeInfo = ni
-// 			} else {
-// 				n.Logger.Error("Node info is not of type DefaultNodeInfo. Custom reactor channels can not be added.")
-// 			}
-// 		}
-// 	}
-// }
 
 // StateProvider overrides the state provider used by state sync to retrieve trusted app hashes and
 // build a State object for bootstrapping the node.
@@ -278,15 +242,15 @@ func NewNode(config *cfg.Config,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
-	return NewNodeWithContext(context.TODO(), config, pubKey,
-		nodeKey, clientCreator, genesisDocProvider, dbProvider,
+	return NewNodesWithContext(context.TODO(), config, nodeKey,
+		clientCreator, genesisDocProvider, dbProvider,
 		metricsProvider, logger, options...)
 }
 
 // NewNodeWithContext is cancellable version of NewNode.
-func NewNodeWithContext(ctx context.Context,
+func NewNodesWithContext(ctx context.Context,
 	config *cfg.Config,
-	pubKey crypto.PubKey,
+	// pubKey crypto.PubKey,
 	nodeKey *p2p.NodeKey,
 	clientCreator proxy.ClientCreator,
 	genesisDocProvider GenesisDocProvider,
@@ -309,6 +273,10 @@ func NewNodeWithContext(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+
+	//
+	// state.NextValidators.GetByAddress()
+	pubKey := state.Validators.Proposer.PubKey
 
 	csMetrics, p2pMetrics, memplMetrics, smMetrics, abciMetrics, bsMetrics, ssMetrics := metricsProvider(genDoc.ChainID)
 
@@ -488,8 +456,9 @@ func NewNodeWithContext(ctx context.Context,
 	node := &Node{
 		config:     config,
 		genesisDoc: genDoc,
-		// privValidator: privValidator,
-		pubKey: pubKey,
+		current_node: currentNode{
+			pubKey: pubKey,
+		},
 
 		transport: transport,
 		sw:        sw,
@@ -685,7 +654,7 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		ConsensusState: n.consensusState,
 		P2PPeers:       n.sw,
 		P2PTransport:   n,
-		PubKey:         n.nodeKey.PubKey(),
+		PubKey:         n.current_node.pubKey,
 
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,

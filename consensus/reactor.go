@@ -72,6 +72,7 @@ func NewReactor(consensusState *State, waitSync bool, options ...ReactorOption) 
 // OnStart implements BaseService by subscribing to events, which later will be
 // broadcasted to other peers and starting state if we're not in block sync.
 func (conR *Reactor) OnStart() error {
+	fmt.Print("========= Reactor consensus on start-> consensus state")
 	conR.Logger.Info("Reactor ", "waitSync", conR.WaitSync())
 
 	// start routine that computes peer statistics for evaluating peer quality
