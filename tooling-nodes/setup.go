@@ -45,38 +45,38 @@ const readHeaderTimeout = 10 * time.Second
 // GenesisDocProvider returns a GenesisDoc.
 // It allows the GenesisDoc to be pulled from sources other than the
 // filesystem, for instance from a distributed key-value store cluster.
-type GenesisDocProvider func() (*types.GenesisDoc, error)
+// type GenesisDocProvider func() (*types.GenesisDoc, error)
 
 // DefaultGenesisDocProviderFunc returns a GenesisDocProvider that loads
 // the GenesisDoc from the config.GenesisFile() on the filesystem.
-func DefaultGenesisDocProviderFunc(config *cfg.Config) GenesisDocProvider {
-	return func() (*types.GenesisDoc, error) {
-		return types.GenesisDocFromFile(config.GenesisFile())
-	}
-}
+// func DefaultGenesisDocProviderFunc(config *cfg.Config) GenesisDocProvider {
+// 	return func() (*types.GenesisDoc, error) {
+// 		return types.GenesisDocFromFile(config.GenesisFile())
+// 	}
+// }
 
 // Provider takes a config and a logger and returns a ready to go Node.
 type Provider func(*cfg.Config, log.Logger) (*Node, error)
 
 // MetricsProvider returns a consensus, p2p and mempool Metrics.
-type MetricsProvider func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics)
+// type MetricsProvider func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics)
 
 // DefaultMetricsProvider returns Metrics build using Prometheus client library
 // if Prometheus is enabled. Otherwise, it returns no-op Metrics.
-func DefaultMetricsProvider(config *cfg.InstrumentationConfig) MetricsProvider {
-	return func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics) {
-		if config.Prometheus {
-			return cs.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				p2p.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				mempl.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				sm.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				proxy.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				blocksync.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				statesync.PrometheusMetrics(config.Namespace, "chain_id", chainID)
-		}
-		return cs.NopMetrics(), p2p.NopMetrics(), mempl.NopMetrics(), sm.NopMetrics(), proxy.NopMetrics(), blocksync.NopMetrics(), statesync.NopMetrics()
-	}
-}
+// func DefaultMetricsProvider(config *cfg.InstrumentationConfig) MetricsProvider {
+// 	return func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics) {
+// 		if config.Prometheus {
+// 			return cs.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				p2p.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				mempl.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				sm.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				proxy.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				blocksync.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				statesync.PrometheusMetrics(config.Namespace, "chain_id", chainID)
+// 		}
+// 		return cs.NopMetrics(), p2p.NopMetrics(), mempl.NopMetrics(), sm.NopMetrics(), proxy.NopMetrics(), blocksync.NopMetrics(), statesync.NopMetrics()
+// 	}
+// }
 
 type blockSyncReactor interface {
 	SwitchToBlockSync(sm.State) error
@@ -528,37 +528,37 @@ var genesisDocKey = []byte("genesisDoc")
 // LoadStateFromDBOrGenesisDocProvider attempts to load the state from the
 // database, or creates one using the given genesisDocProvider. On success this also
 // returns the genesis doc loaded through the given provider.
-func LoadStateFromDBOrGenesisDocProvider(
-	stateDB dbm.DB,
-	genesisDocProvider GenesisDocProvider,
-) (sm.State, *types.GenesisDoc, error) {
-	// Get genesis doc
-	genDoc, err := loadGenesisDoc(stateDB)
-	if err != nil {
-		genDoc, err = genesisDocProvider()
-		if err != nil {
-			return sm.State{}, nil, err
-		}
+// func LoadStateFromDBOrGenesisDocProvider(
+// 	stateDB dbm.DB,
+// 	genesisDocProvider GenesisDocProvider,
+// ) (sm.State, *types.GenesisDoc, error) {
+// 	// Get genesis doc
+// 	genDoc, err := loadGenesisDoc(stateDB)
+// 	if err != nil {
+// 		genDoc, err = genesisDocProvider()
+// 		if err != nil {
+// 			return sm.State{}, nil, err
+// 		}
 
-		err = genDoc.ValidateAndComplete()
-		if err != nil {
-			return sm.State{}, nil, fmt.Errorf("error in genesis doc: %w", err)
-		}
-		// save genesis doc to prevent a certain class of user errors (e.g. when it
-		// was changed, accidentally or not). Also good for audit trail.
-		if err := saveGenesisDoc(stateDB, genDoc); err != nil {
-			return sm.State{}, nil, err
-		}
-	}
-	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
-		DiscardABCIResponses: false,
-	})
-	state, err := stateStore.LoadFromDBOrGenesisDoc(genDoc)
-	if err != nil {
-		return sm.State{}, nil, err
-	}
-	return state, genDoc, nil
-}
+// 		err = genDoc.ValidateAndComplete()
+// 		if err != nil {
+// 			return sm.State{}, nil, fmt.Errorf("error in genesis doc: %w", err)
+// 		}
+// 		// save genesis doc to prevent a certain class of user errors (e.g. when it
+// 		// was changed, accidentally or not). Also good for audit trail.
+// 		if err := saveGenesisDoc(stateDB, genDoc); err != nil {
+// 			return sm.State{}, nil, err
+// 		}
+// 	}
+// 	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
+// 		DiscardABCIResponses: false,
+// 	})
+// 	state, err := stateStore.LoadFromDBOrGenesisDoc(genDoc)
+// 	if err != nil {
+// 		return sm.State{}, nil, err
+// 	}
+// 	return state, genDoc, nil
+// }
 
 // panics if failed to unmarshal bytes
 func loadGenesisDoc(db dbm.DB) (*types.GenesisDoc, error) {

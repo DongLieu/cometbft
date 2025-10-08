@@ -38,21 +38,39 @@ import (
 	"github.com/cometbft/cometbft/version"
 
 	_ "net/http/pprof" //nolint: gosec
+
+	"github.com/cometbft/cometbft/node"
 )
 
 // Node is the highest level interface to a full CometBFT node.
 // It includes all configuration information and running services.
-
-type currentNode struct {
+type ConfigNode struct {
 	pubKey crypto.PubKey
+	// A custom human readable name for this node
+	Moniker string `mapstructure:"moniker"`
+
+	// A JSON file containing the private key to use for p2p authenticated encryption
+	NodeKey string `mapstructure:"node_key_file"`
+
+	DoubleSignCheckHeight int64
+}
+
+type NodeKeyP2P struct {
+	pubKey   crypto.PubKey
+	nodeKeys *p2p.NodeKey
 }
 
 type Node struct {
 	service.BaseService
-	current_node currentNode
+
+	// rangeNNode
+	configNodes []ConfigNode
+	nodeKeys    []NodeKeyP2P
+
+	current_node crypto.PubKey
+	config       *cfg.Config
 
 	// config
-	config     *cfg.Config
 	genesisDoc *types.GenesisDoc // initial validator set
 
 	// services
@@ -85,18 +103,18 @@ type Option func(*Node)
 // ------------------------------------------------------------------------------
 // NewNodeWithContext is cancellable version of NewNode.
 func NewNodesWithContext(ctx context.Context,
-	configs []*cfg.Config,
-	nodeKeys []*p2p.NodeKey,
+	config *cfg.Config,
+	pubKey crypto.PubKey,
+	nodeKey *p2p.NodeKey,
+	configNodes []ConfigNode,
+	nodeKeys []NodeKeyP2P,
 	clientCreator proxy.ClientCreator,
-	genesisDocProvider GenesisDocProvider,
+	genesisDocProvider node.GenesisDocProvider,
 	dbProvider cfg.DBProvider,
-	metricsProvider MetricsProvider,
+	metricsProvider node.MetricsProvider,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
-	fmt.Println("startwwithcontexttttttt")
-	config := configs[0]
-	nodeKey := nodeKeys[0]
 	blockStore, stateDB, err := initDBs(config, dbProvider)
 	if err != nil {
 		return nil, err
@@ -106,14 +124,13 @@ func NewNodesWithContext(ctx context.Context,
 		DiscardABCIResponses: config.Storage.DiscardABCIResponses,
 	})
 
-	state, genDoc, err := LoadStateFromDBOrGenesisDocProvider(stateDB, genesisDocProvider)
+	state, genDoc, err := node.LoadStateFromDBOrGenesisDocProvider(stateDB, genesisDocProvider)
 	if err != nil {
 		return nil, err
 	}
 
 	//
 	// state.NextValidators.GetByAddress()
-	pubKey := state.Validators.Proposer.PubKey
 
 	csMetrics, p2pMetrics, memplMetrics, smMetrics, abciMetrics, bsMetrics, ssMetrics := metricsProvider(genDoc.ChainID)
 
@@ -291,17 +308,9 @@ func NewNodesWithContext(ctx context.Context,
 	addrBook.AddPrivateIDs(splitAndTrimEmpty(config.P2P.PrivatePeerIDs, ",", " "))
 
 	node := &Node{
-		config:     config,
-		genesisDoc: genDoc,
-		current_node: currentNode{
-			pubKey: pubKey,
-		},
-
-		// transport: transport,
-		// sw:        sw,
-		// addrBook:  addrBook,
-		// nodeInfo:  nodeInfo,
-		// nodeKey:   nodeKey,
+		config:       config,
+		genesisDoc:   genDoc,
+		current_node: pubKey,
 
 		stateStore:       stateStore,
 		blockStore:       blockStore,
@@ -491,7 +500,7 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		ConsensusState: n.consensusState,
 		// P2PPeers:       n.sw,
 		// P2PTransport:   n,
-		PubKey: n.current_node.pubKey,
+		PubKey: n.current_node,
 
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,
