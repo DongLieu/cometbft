@@ -1,4 +1,4 @@
-package nodes_fork
+package tooling_nodes
 
 import (
 	"bytes"
@@ -57,26 +57,6 @@ func DefaultGenesisDocProviderFunc(config *cfg.Config) GenesisDocProvider {
 
 // Provider takes a config and a logger and returns a ready to go Node.
 type Provider func(*cfg.Config, log.Logger) (*Node, error)
-
-// DefaultNewNode returns a CometBFT node with default settings for the
-// PrivValidator, ClientCreator, GenesisDoc, and DBProvider.
-// It implements NodeProvider.
-func DefaultNewNode(config *cfg.Config, logger log.Logger) (*Node, error) {
-	nodeKey, err := p2p.LoadOrGenNodeKey(config.NodeKeyFile())
-	if err != nil {
-		return nil, fmt.Errorf("failed to load or gen node key %s: %w", config.NodeKeyFile(), err)
-	}
-
-	return NewNode(config,
-		privval.LoadOrGenFilePV(config.PrivValidatorKeyFile(), config.PrivValidatorStateFile()).Key.PubKey,
-		nodeKey,
-		proxy.DefaultClientCreator(config.ProxyApp, config.ABCI, config.DBDir()),
-		DefaultGenesisDocProviderFunc(config),
-		cfg.DefaultDBProvider,
-		DefaultMetricsProvider(config.Instrumentation),
-		logger,
-	)
-}
 
 // MetricsProvider returns a consensus, p2p and mempool Metrics.
 type MetricsProvider func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics)

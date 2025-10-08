@@ -1,4 +1,4 @@
-package keyset
+package tooling_keyset
 
 import (
 	"fmt"

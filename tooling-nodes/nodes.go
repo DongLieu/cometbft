@@ -1,12 +1,10 @@
-package nodes_fork
+package tooling_nodes
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,7 +16,6 @@ import (
 	cs "github.com/cometbft/cometbft/consensus"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/evidence"
-	"github.com/cometbft/cometbft/light"
 
 	"github.com/cometbft/cometbft/libs/log"
 	cmtpubsub "github.com/cometbft/cometbft/libs/pubsub"
@@ -58,14 +55,6 @@ type Node struct {
 	config     *cfg.Config
 	genesisDoc *types.GenesisDoc // initial validator set
 
-	// network
-	transport   *p2p.MultiplexTransport
-	sw          *p2p.Switch  // p2p connections
-	addrBook    pex.AddrBook // known peers
-	nodeInfo    p2p.NodeInfo
-	nodeKey     *p2p.NodeKey // our node privkey
-	isListening bool
-
 	// services
 	eventBus          *types.EventBus // pub/sub for services
 	stateStore        sm.Store
@@ -93,165 +82,11 @@ type Node struct {
 // Option sets a parameter for the node.
 type Option func(*Node)
 
-// StateProvider overrides the state provider used by state sync to retrieve trusted app hashes and
-// build a State object for bootstrapping the node.
-// WARNING: this interface is considered unstable and subject to change.
-func StateProvider(stateProvider statesync.StateProvider) Option {
-	return func(n *Node) {
-		n.stateSyncProvider = stateProvider
-	}
-}
-
-// BootstrapState synchronizes the stores with the application after state sync
-// has been performed offline. It is expected that the block store and state
-// store are empty at the time the function is called.
-//
-// If the block store is not empty, the function returns an error.
-func BootstrapState(ctx context.Context, config *cfg.Config, dbProvider cfg.DBProvider, height uint64, appHash []byte) error {
-	return BootstrapStateWithGenProvider(ctx, config, dbProvider, DefaultGenesisDocProviderFunc(config), height, appHash)
-}
-
-// BootstrapStateWithGenProvider synchronizes the stores with the application after state sync
-// has been performed offline. It is expected that the block store and state
-// store are empty at the time the function is called.
-//
-// If the block store is not empty, the function returns an error.
-func BootstrapStateWithGenProvider(ctx context.Context, config *cfg.Config, dbProvider cfg.DBProvider, genProvider GenesisDocProvider, height uint64, appHash []byte) (err error) {
-	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	if config == nil {
-		logger.Info("no config provided, using default configuration")
-		config = cfg.DefaultConfig()
-	}
-
-	if dbProvider == nil {
-		dbProvider = cfg.DefaultDBProvider
-	}
-	blockStore, stateDB, err := initDBs(config, dbProvider)
-
-	defer func() {
-		if derr := blockStore.Close(); derr != nil {
-			logger.Error("Failed to close blockstore", "err", derr)
-			// Set the return value
-			err = derr
-		}
-	}()
-
-	if err != nil {
-		return err
-	}
-
-	if !blockStore.IsEmpty() {
-		return fmt.Errorf("blockstore not empty, trying to initialize non empty state")
-	}
-
-	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
-		DiscardABCIResponses: config.Storage.DiscardABCIResponses,
-	})
-
-	defer func() {
-		if derr := stateStore.Close(); derr != nil {
-			logger.Error("Failed to close statestore", "err", derr)
-			// Set the return value
-			err = derr
-		}
-	}()
-	state, err := stateStore.Load()
-	if err != nil {
-		return err
-	}
-
-	if !state.IsEmpty() {
-		return fmt.Errorf("state not empty, trying to initialize non empty state")
-	}
-
-	genState, _, err := LoadStateFromDBOrGenesisDocProvider(stateDB, genProvider)
-	if err != nil {
-		return err
-	}
-
-	stateProvider, err := statesync.NewLightClientStateProvider(
-		ctx,
-		genState.ChainID, genState.Version, genState.InitialHeight,
-		config.StateSync.RPCServers, light.TrustOptions{
-			Period: config.StateSync.TrustPeriod,
-			Height: config.StateSync.TrustHeight,
-			Hash:   config.StateSync.TrustHashBytes(),
-		}, logger.With("module", "light"))
-	if err != nil {
-		return fmt.Errorf("failed to set up light client state provider: %w", err)
-	}
-
-	state, err = stateProvider.State(ctx, height)
-	if err != nil {
-		return err
-	}
-	if appHash == nil {
-		logger.Info("warning: cannot verify appHash. Verification will happen when node boots up!")
-	} else {
-		if !bytes.Equal(appHash, state.AppHash) {
-			if err := blockStore.Close(); err != nil {
-				logger.Error("failed to close blockstore: %w", err)
-			}
-			if err := stateStore.Close(); err != nil {
-				logger.Error("failed to close statestore: %w", err)
-			}
-			return fmt.Errorf("the app hash returned by the light client does not match the provided appHash, expected %X, got %X", state.AppHash, appHash)
-		}
-	}
-
-	commit, err := stateProvider.Commit(ctx, height)
-	if err != nil {
-		return err
-	}
-
-	if err = stateStore.Bootstrap(state); err != nil {
-		return err
-	}
-
-	err = blockStore.SaveSeenCommit(state.LastBlockHeight, commit)
-	if err != nil {
-		return err
-	}
-
-	// Once the stores are bootstrapped, we need to set the height at which the node has finished
-	// statesyncing. This will allow the blocksync reactor to fetch blocks at a proper height.
-	// In case this operation fails, it is equivalent to a failure in  online state sync where the operator
-	// needs to manually delete the state and blockstores and rerun the bootstrapping process.
-	err = stateStore.SetOfflineStateSyncHeight(state.LastBlockHeight)
-	if err != nil {
-		return fmt.Errorf("failed to set synced height: %w", err)
-	}
-
-	return err
-}
-
-//------------------------------------------------------------------------------
-
-// NewNode returns a new, ready to go, CometBFT Node.
-func NewNode(config *cfg.Config,
-	pubKey crypto.PubKey,
-	nodeKey *p2p.NodeKey,
-	clientCreator proxy.ClientCreator,
-	genesisDocProvider GenesisDocProvider,
-	dbProvider cfg.DBProvider,
-	metricsProvider MetricsProvider,
-	logger log.Logger,
-	options ...Option,
-) (*Node, error) {
-	return NewNodesWithContext(context.TODO(), config, nodeKey,
-		clientCreator, genesisDocProvider, dbProvider,
-		metricsProvider, logger, options...)
-}
-
+// ------------------------------------------------------------------------------
 // NewNodeWithContext is cancellable version of NewNode.
 func NewNodesWithContext(ctx context.Context,
-	config *cfg.Config,
-	// pubKey crypto.PubKey,
-	nodeKey *p2p.NodeKey,
+	configs []*cfg.Config,
+	nodeKeys []*p2p.NodeKey,
 	clientCreator proxy.ClientCreator,
 	genesisDocProvider GenesisDocProvider,
 	dbProvider cfg.DBProvider,
@@ -260,6 +95,8 @@ func NewNodesWithContext(ctx context.Context,
 	options ...Option,
 ) (*Node, error) {
 	fmt.Println("startwwithcontexttttttt")
+	config := configs[0]
+	nodeKey := nodeKeys[0]
 	blockStore, stateDB, err := initDBs(config, dbProvider)
 	if err != nil {
 		return nil, err
@@ -460,11 +297,11 @@ func NewNodesWithContext(ctx context.Context,
 			pubKey: pubKey,
 		},
 
-		transport: transport,
-		sw:        sw,
-		addrBook:  addrBook,
-		nodeInfo:  nodeInfo,
-		nodeKey:   nodeKey,
+		// transport: transport,
+		// sw:        sw,
+		// addrBook:  addrBook,
+		// nodeInfo:  nodeInfo,
+		// nodeKey:   nodeKey,
 
 		stateStore:       stateStore,
 		blockStore:       blockStore,
@@ -526,29 +363,29 @@ func (n *Node) OnStart() error {
 	}
 
 	// Start the transport.
-	fmt.Println("-------start p2p transport")
-	addr, err := p2p.NewNetAddressString(p2p.IDAddressString(n.nodeKey.ID(), n.config.P2P.ListenAddress))
-	if err != nil {
-		return err
-	}
-	if err := n.transport.Listen(*addr); err != nil {
-		return err
-	}
+	// fmt.Println("-------start p2p transport")
+	// addr, err := p2p.NewNetAddressString(p2p.IDAddressString(n.nodeKey.ID(), n.config.P2P.ListenAddress))
+	// if err != nil {
+	// 	return err
+	// }
+	// if err := n.transport.Listen(*addr); err != nil {
+	// 	return err
+	// }
 
-	n.isListening = true
+	// n.isListening = true
 
-	// Start the switch (the P2P server).
-	fmt.Println("-------start p2p switch")
-	err = n.sw.Start()
-	if err != nil {
-		return err
-	}
+	// // Start the switch (the P2P server).
+	// fmt.Println("-------start p2p switch")
+	// err = n.sw.Start()
+	// if err != nil {
+	// 	return err
+	// }
 	fmt.Println("-------start p2p switch1.5")
 	// Always connect to persistent peers
-	err = n.sw.DialPeersAsync(splitAndTrimEmpty(n.config.P2P.PersistentPeers, ",", " "))
-	if err != nil {
-		return fmt.Errorf("could not dial peers from persistent_peers field: %w", err)
-	}
+	// err = n.sw.DialPeersAsync(splitAndTrimEmpty(n.config.P2P.PersistentPeers, ",", " "))
+	// if err != nil {
+	// 	return fmt.Errorf("could not dial peers from persistent_peers field: %w", err)
+	// }
 
 	fmt.Println("-------start p2p switch2")
 	// Run state sync
@@ -582,16 +419,16 @@ func (n *Node) OnStop() {
 		n.Logger.Error("Error closing indexerService", "err", err)
 	}
 
-	// now stop the reactors
-	if err := n.sw.Stop(); err != nil {
-		n.Logger.Error("Error closing switch", "err", err)
-	}
+	// // now stop the reactors
+	// if err := n.sw.Stop(); err != nil {
+	// 	n.Logger.Error("Error closing switch", "err", err)
+	// }
 
-	if err := n.transport.Close(); err != nil {
-		n.Logger.Error("Error closing transport", "err", err)
-	}
+	// if err := n.transport.Close(); err != nil {
+	// 	n.Logger.Error("Error closing transport", "err", err)
+	// }
 
-	n.isListening = false
+	// n.isListening = false
 
 	// finally stop the listeners / external services
 	for _, l := range n.rpcListeners {
@@ -652,9 +489,9 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		BlockStore:     n.blockStore,
 		EvidencePool:   n.evidencePool,
 		ConsensusState: n.consensusState,
-		P2PPeers:       n.sw,
-		P2PTransport:   n,
-		PubKey:         n.current_node.pubKey,
+		// P2PPeers:       n.sw,
+		// P2PTransport:   n,
+		PubKey: n.current_node.pubKey,
 
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,
@@ -836,10 +673,10 @@ func (n *Node) startPprofServer() *http.Server {
 	return srv
 }
 
-// Switch returns the Node's Switch.
-func (n *Node) Switch() *p2p.Switch {
-	return n.sw
-}
+// // Switch returns the Node's Switch.
+// func (n *Node) Switch() *p2p.Switch {
+// 	return n.sw
+// }
 
 // BlockStore returns the Node's BlockStore.
 func (n *Node) BlockStore() *store.BlockStore {
@@ -905,14 +742,14 @@ func (n *Node) Listeners() []string {
 	}
 }
 
-func (n *Node) IsListening() bool {
-	return n.isListening
-}
+// func (n *Node) IsListening() bool {
+// 	return n.isListening
+// }
 
-// NodeInfo returns the Node's Info from the Switch.
-func (n *Node) NodeInfo() p2p.NodeInfo {
-	return n.nodeInfo
-}
+// // NodeInfo returns the Node's Info from the Switch.
+// func (n *Node) NodeInfo() p2p.NodeInfo {
+// 	return n.nodeInfo
+// }
 
 func makeNodeInfo(
 	config *cfg.Config,
