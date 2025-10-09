@@ -129,7 +129,7 @@ func (t *timeoutTicker) timeoutRoutine() {
 			t.Logger.Debug("Scheduled timeout", "dur", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
 		case <-t.timer.C:
 			t.timerActive = false
-			t.Logger.Info("Timed out2", "dur", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
+			t.Logger.Info("Timed out", "dur", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
 			// go routine here guarantees timeoutRoutine doesn't block.
 			// Determinism comes from playback in the receiveRoutine.
 			// We can eliminate it by merging the timeoutRoutine into receiveRoutine

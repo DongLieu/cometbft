@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -43,7 +42,6 @@ func main() {
 	//	* Provide their own DB implementation
 	// can copy this file and use something other than the
 	// DefaultNewNode function
-	fmt.Println("defaault new nodeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 	nodeFunc := nm.DefaultNewNode
 
 	// Create & start node

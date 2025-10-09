@@ -203,7 +203,6 @@ func NewState(
 
 	// NOTE: we do not call scheduleRound0 yet, we do that upon Start()
 
-	// init state
 	cs.BaseService = *service.NewBaseService(nil, "State", cs)
 
 	return cs
@@ -1199,7 +1198,6 @@ func (cs *State) enterPropose(height int64, round int32) {
 		logger.Error("propose step; empty priv validator public key", "err", errPubKeyIsNotSet)
 		return
 	}
-	fmt.Println("enterPropose: 11111")
 	proposer := cs.Validators.GetProposer().Address
 	cs.setProposer(proposer)
 
@@ -1213,7 +1211,6 @@ func (cs *State) enterPropose(height int64, round int32) {
 
 	if cs.isProposer(address) {
 		logger.Debug("propose step; our turn to propose", "proposer", address)
-		// tao block
 		cs.decideProposal(height, round)
 	} else {
 		logger.Debug("propose step; not our turn to propose", "proposer", cs.Validators.GetProposer().Address)
@@ -2464,9 +2461,7 @@ func (cs *State) signVotesForAll(msgType cmtproto.SignedMsgType,
 		// }
 		vote.Signature = []byte{12}
 
-		// bơm như thể là message đến từ peer (peerID rỗng/self cũng được)
 		cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, ""})
-		// hoặc gọi trực tiếp cs.addVote(vote, "") nếu muốn
 	}
 	return nil
 }

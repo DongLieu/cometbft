@@ -190,7 +190,6 @@ func (blockExec *BlockExecutor) ProcessProposal(
 func (blockExec *BlockExecutor) ValidateBlock(state State, block *types.Block) error {
 	err := validateBlock(state, block)
 	if err != nil {
-		fmt.Println("1119999")
 		return err
 	}
 	return blockExec.evpool.CheckEvidence(block.Evidence.Evidence)

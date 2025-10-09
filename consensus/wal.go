@@ -130,7 +130,6 @@ func (wal *BaseWAL) OnStart() error {
 			return err
 		}
 	}
-	// group start
 	err = wal.group.Start()
 	if err != nil {
 		return err

@@ -423,11 +423,7 @@ func SignAndCheckVote(
 	vote.Signature = []byte{12}
 
 	isPrecommit := vote.Type == cmtproto.PrecommitType
-	fmt.Println("11111111111111111111")
-	fmt.Println(extensionsEnabled)
-	fmt.Println(isPrecommit)
 	if !isPrecommit && extensionsEnabled {
-		fmt.Println("runnnnnnnnn")
 		// Non-recoverable because the caller passed parameters that don't make sense
 		return false, &ErrVoteExtensionInvalid{ExtSignature: v.ExtensionSignature}
 	}
@@ -435,8 +431,6 @@ func SignAndCheckVote(
 	// isNil := vote.BlockID.IsZero()
 	// extSignature := (len(v.ExtensionSignature) > 0)
 	// if extSignature == (!isPrecommit || isNil) {
-	// 	fmt.Println("runnnnnnnnn222")
-	// 	fmt.Println("2222222222222222222222222222")
 	// 	// Non-recoverable because the vote is malformed
 	// 	return false, fmt.Errorf("looi vote 2222")
 	// }

@@ -162,7 +162,7 @@ LOOP:
 			return err
 		}
 	}
-	cs.Logger.Info("Replay: Done") // done
+	cs.Logger.Info("Replay: Done")
 	return nil
 }
 
@@ -458,7 +458,6 @@ func (h *Handshaker) ReplayBlocksWithContext(
 		appBlockHeight, storeBlockHeight, stateBlockHeight))
 }
 
-// doc lai
 func (h *Handshaker) replayBlocks(
 	ctx context.Context,
 	state sm.State,

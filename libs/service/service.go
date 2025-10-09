@@ -129,7 +129,6 @@ func (bs *BaseService) SetLogger(l log.Logger) {
 // stopped service, you need to call Reset.
 func (bs *BaseService) Start() error {
 	// time.Sleep(5 * time.Second)
-	fmt.Println("startttttttt 1", bs.name)
 	if atomic.CompareAndSwapUint32(&bs.started, 0, 1) {
 		if atomic.LoadUint32(&bs.stopped) == 1 {
 			bs.Logger.Error(fmt.Sprintf("Not starting %v service -- already stopped", bs.name),
