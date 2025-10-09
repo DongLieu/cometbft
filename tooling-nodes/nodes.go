@@ -91,8 +91,8 @@ type Option func(*Node)
 // NewNodeWithContext is cancellable version of NewNode.
 func NewNodesWithContext(ctx context.Context,
 	config *cfg.Config,
-	pubKey crypto.PubKey,
-	listPubKey []crypto.PubKey,
+	// pubKey crypto.PubKey,
+	// listPubKey []crypto.PubKey,
 	nodeKey *p2p.NodeKey,
 	clientCreator proxy.ClientCreator,
 	genesisDocProvider node.GenesisDocProvider,
@@ -114,6 +114,7 @@ func NewNodesWithContext(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	pubKey, listPubKey := getVal(state.Validators.Validators)
 
 	//
 	// state.NextValidators.GetByAddress()
@@ -333,6 +334,16 @@ func NewNodesWithContext(ctx context.Context,
 
 	fmt.Println("-------start node, //////////////////////////////////////////////")
 	return node, nil
+}
+
+func getVal(validators []*types.Validator) (crypto.PubKey, []crypto.PubKey) {
+	var listPubKey []crypto.PubKey
+
+	for _, val := range validators {
+		listPubKey = append(listPubKey, val.PubKey)
+	}
+
+	return validators[0].PubKey, listPubKey
 }
 
 // OnStart starts the Node. It implements service.Service.
