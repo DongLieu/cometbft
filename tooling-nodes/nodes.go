@@ -42,35 +42,12 @@ import (
 	"github.com/cometbft/cometbft/node"
 )
 
-// Node is the highest level interface to a full CometBFT node.
-// It includes all configuration information and running services.
-type ConfigNode struct {
-	pubKey crypto.PubKey
-	// A custom human readable name for this node
-	Moniker string `mapstructure:"moniker"`
-
-	// A JSON file containing the private key to use for p2p authenticated encryption
-	NodeKey string `mapstructure:"node_key_file"`
-
-	DoubleSignCheckHeight int64
-}
-
-type NodeKeyP2P struct {
-	pubKey   crypto.PubKey
-	nodeKeys *p2p.NodeKey
-}
-
 type Node struct {
 	service.BaseService
-
-	// rangeNNode
-	configNodes []ConfigNode
-	nodeKeys    []NodeKeyP2P
 
 	current_node crypto.PubKey
 	config       *cfg.Config
 	listPubKey   []crypto.PubKey
-	quePubKey    []crypto.PubKey
 	pubkey       crypto.PubKey
 
 	// network
@@ -117,8 +94,6 @@ func NewNodesWithContext(ctx context.Context,
 	pubKey crypto.PubKey,
 	listPubKey []crypto.PubKey,
 	nodeKey *p2p.NodeKey,
-	configNodes []ConfigNode,
-	nodeKeys []NodeKeyP2P,
 	clientCreator proxy.ClientCreator,
 	genesisDocProvider node.GenesisDocProvider,
 	dbProvider cfg.DBProvider,
@@ -206,8 +181,8 @@ func NewNodesWithContext(ctx context.Context,
 
 	// Determine whether we should do block sync. This must happen after the handshake, since the
 	// app may modify the validator set, specifying ourself as the only validator.
-	blockSync := !onlyValidatorIsUs(state, pubKey)
-	blockSync = false
+	// blockSync := !onlyValidatorIsUs(state, pubKey)
+	blockSync := false
 
 	logNodeStartupInfo(state, pubKey, logger, consensusLogger)
 
