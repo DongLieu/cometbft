@@ -2,6 +2,8 @@ package privval
 
 import (
 	"bytes"
+	// "encoding/base64"
+	// "encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -207,7 +209,6 @@ func loadFilePV(keyFilePath, stateFilePath string, loadState bool) *FilePV {
 	}
 
 	// overwrite pubkey and address for convenience
-	pvKey.PubKey = pvKey.PrivKey.PubKey()
 	pvKey.Address = pvKey.PubKey.Address()
 	pvKey.filePath = keyFilePath
 

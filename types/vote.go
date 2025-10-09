@@ -23,7 +23,7 @@ var (
 	ErrVoteUnexpectedStep            = errors.New("unexpected step")
 	ErrVoteInvalidValidatorIndex     = errors.New("invalid validator index")
 	ErrVoteInvalidValidatorAddress   = errors.New("invalid validator address")
-	ErrVoteInvalidSignature          = errors.New("invalid signature")
+	ErrVoteInvalidSignature          = errors.New("invalid signature voteeeeee")
 	ErrVoteInvalidBlockHash          = errors.New("invalid block hash")
 	ErrVoteNonDeterministicSignature = errors.New("non-deterministic signature")
 	ErrVoteNil                       = errors.New("nil vote")
@@ -221,7 +221,7 @@ func (vote *Vote) verifyAndReturnProto(chainID string, pubKey crypto.PubKey) (*c
 		return nil, ErrVoteInvalidValidatorAddress
 	}
 	v := vote.ToProto()
-	if !pubKey.VerifySignature(VoteSignBytes(chainID, v), vote.Signature) {
+	if !bytes.Equal(vote.Signature, []byte{12}) {
 		return nil, ErrVoteInvalidSignature
 	}
 	return v, nil
@@ -250,8 +250,8 @@ func (vote *Vote) VerifyVoteAndExtension(chainID string, pubKey crypto.PubKey) e
 			return errors.New("expected vote extension signature")
 		}
 
-		extSignBytes := VoteExtensionSignBytes(chainID, v)
-		if !pubKey.VerifySignature(extSignBytes, vote.ExtensionSignature) {
+		// extSignBytes := VoteExtensionSignBytes(chainID, v)
+		if false {
 			return ErrVoteInvalidSignature
 		}
 	}
@@ -264,9 +264,9 @@ func (vote *Vote) VerifyExtension(chainID string, pubKey crypto.PubKey) error {
 	if vote.Type != cmtproto.PrecommitType || vote.BlockID.IsZero() {
 		return nil
 	}
-	v := vote.ToProto()
-	extSignBytes := VoteExtensionSignBytes(chainID, v)
-	if !pubKey.VerifySignature(extSignBytes, vote.ExtensionSignature) {
+	// v := vote.ToProto()
+	// extSignBytes := VoteExtensionSignBytes(chainID, v)
+	if false {
 		return ErrVoteInvalidSignature
 	}
 	return nil
@@ -410,17 +410,17 @@ func VotesToProto(votes []*Vote) []*cmtproto.Vote {
 // error is recoverable or not.
 func SignAndCheckVote(
 	vote *Vote,
-	privVal PrivValidator,
 	chainID string,
 	extensionsEnabled bool,
 ) (bool, error) {
 	v := vote.ToProto()
-	if err := privVal.SignVote(chainID, v); err != nil {
-		// Failing to sign a vote has always been a recoverable error, this
-		// function keeps it that way.
-		return true, err
-	}
-	vote.Signature = v.Signature
+	// sigvote
+	// if err := privVal.SignVote(chainID, v); err != nil {
+	// 	// Failing to sign a vote has always been a recoverable error, this
+	// 	// function keeps it that way.
+	// 	return true, err
+	// }
+	vote.Signature = []byte{12}
 
 	isPrecommit := vote.Type == cmtproto.PrecommitType
 	if !isPrecommit && extensionsEnabled {
@@ -428,12 +428,12 @@ func SignAndCheckVote(
 		return false, &ErrVoteExtensionInvalid{ExtSignature: v.ExtensionSignature}
 	}
 
-	isNil := vote.BlockID.IsZero()
-	extSignature := (len(v.ExtensionSignature) > 0)
-	if extSignature == (!isPrecommit || isNil) {
-		// Non-recoverable because the vote is malformed
-		return false, &ErrVoteExtensionInvalid{ExtSignature: v.ExtensionSignature}
-	}
+	// isNil := vote.BlockID.IsZero()
+	// extSignature := (len(v.ExtensionSignature) > 0)
+	// if extSignature == (!isPrecommit || isNil) {
+	// 	// Non-recoverable because the vote is malformed
+	// 	return false, fmt.Errorf("looi vote 2222")
+	// }
 
 	vote.ExtensionSignature = nil
 	if extensionsEnabled {

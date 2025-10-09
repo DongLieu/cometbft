@@ -219,7 +219,7 @@ func (s *syncer) SyncAny(discoveryTime time.Duration, retryHook func()) (sm.Stat
 			}
 
 		case errors.Is(err, context.DeadlineExceeded):
-			s.logger.Info("Timed out validating snapshot, rejecting", "height", snapshot.Height, "err", err)
+			s.logger.Info("Timed out 1 validating snapshot, rejecting", "height", snapshot.Height, "err", err)
 			s.snapshots.Reject(snapshot)
 
 		default:

@@ -1,12 +1,10 @@
-package node
+package tooling_nodes
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,7 +16,6 @@ import (
 	cs "github.com/cometbft/cometbft/consensus"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/evidence"
-	"github.com/cometbft/cometbft/light"
 
 	"github.com/cometbft/cometbft/libs/log"
 	cmtpubsub "github.com/cometbft/cometbft/libs/pubsub"
@@ -41,26 +38,27 @@ import (
 	"github.com/cometbft/cometbft/version"
 
 	_ "net/http/pprof" //nolint: gosec
+
+	"github.com/cometbft/cometbft/node"
 )
 
-// Node is the highest level interface to a full CometBFT node.
-// It includes all configuration information and running services.
 type Node struct {
 	service.BaseService
 
-	// config
-	config     *cfg.Config
-	genesisDoc *types.GenesisDoc // initial validator set
-	// privValidator types.PrivValidator // local node's validator key
-	pubKey crypto.PubKey
+	current_node crypto.PubKey
+	config       *cfg.Config
+	listPubKey   []crypto.PubKey
+	pubkey       crypto.PubKey
 
 	// network
+	sw          *p2p.Switch // p2p connections
 	transport   *p2p.MultiplexTransport
-	sw          *p2p.Switch  // p2p connections
-	addrBook    pex.AddrBook // known peers
-	nodeInfo    p2p.NodeInfo
-	nodeKey     *p2p.NodeKey // our node privkey
 	isListening bool
+	nodeInfo    p2p.NodeInfo
+	nodeKey     *p2p.NodeKey
+
+	// config
+	genesisDoc *types.GenesisDoc // initial validator set
 
 	// services
 	eventBus          *types.EventBus // pub/sub for services
@@ -89,213 +87,20 @@ type Node struct {
 // Option sets a parameter for the node.
 type Option func(*Node)
 
-// CustomReactors allows you to add custom reactors (name -> p2p.Reactor) to
-// the node's Switch.
-//
-// WARNING: using any name from the below list of the existing reactors will
-// result in replacing it with the custom one.
-//
-//   - MEMPOOL
-//   - BLOCKSYNC
-//   - CONSENSUS
-//   - EVIDENCE
-//   - PEX
-//   - STATESYNC
-// func CustomReactors(reactors map[string]p2p.Reactor) Option {
-// 	return func(n *Node) {
-// 		for name, reactor := range reactors {
-// 			if existingReactor := n.sw.Reactor(name); existingReactor != nil {
-// 				n.sw.Logger.Info("Replacing existing reactor with a custom one",
-// 					"name", name, "existing", existingReactor, "custom", reactor)
-// 				n.sw.RemoveReactor(name, existingReactor)
-// 			}
-// 			n.sw.AddReactor(name, reactor)
-// 			// register the new channels to the nodeInfo
-// 			// NOTE: This is a bit messy now with the type casting but is
-// 			// cleaned up in the following version when NodeInfo is changed from
-// 			// and interface to a concrete type
-// 			if ni, ok := n.nodeInfo.(p2p.DefaultNodeInfo); ok {
-// 				for _, chDesc := range reactor.GetChannels() {
-// 					if !ni.HasChannel(chDesc.ID) {
-// 						ni.Channels = append(ni.Channels, chDesc.ID)
-// 						n.transport.AddChannel(chDesc.ID)
-// 					}
-// 				}
-// 				n.nodeInfo = ni
-// 			} else {
-// 				n.Logger.Error("Node info is not of type DefaultNodeInfo. Custom reactor channels can not be added.")
-// 			}
-// 		}
-// 	}
-// }
-
-// StateProvider overrides the state provider used by state sync to retrieve trusted app hashes and
-// build a State object for bootstrapping the node.
-// WARNING: this interface is considered unstable and subject to change.
-func StateProvider(stateProvider statesync.StateProvider) Option {
-	return func(n *Node) {
-		n.stateSyncProvider = stateProvider
-	}
-}
-
-// BootstrapState synchronizes the stores with the application after state sync
-// has been performed offline. It is expected that the block store and state
-// store are empty at the time the function is called.
-//
-// If the block store is not empty, the function returns an error.
-func BootstrapState(ctx context.Context, config *cfg.Config, dbProvider cfg.DBProvider, height uint64, appHash []byte) error {
-	return BootstrapStateWithGenProvider(ctx, config, dbProvider, DefaultGenesisDocProviderFunc(config), height, appHash)
-}
-
-// BootstrapStateWithGenProvider synchronizes the stores with the application after state sync
-// has been performed offline. It is expected that the block store and state
-// store are empty at the time the function is called.
-//
-// If the block store is not empty, the function returns an error.
-func BootstrapStateWithGenProvider(ctx context.Context, config *cfg.Config, dbProvider cfg.DBProvider, genProvider GenesisDocProvider, height uint64, appHash []byte) (err error) {
-	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	if config == nil {
-		logger.Info("no config provided, using default configuration")
-		config = cfg.DefaultConfig()
-	}
-
-	if dbProvider == nil {
-		dbProvider = cfg.DefaultDBProvider
-	}
-	blockStore, stateDB, err := initDBs(config, dbProvider)
-
-	defer func() {
-		if derr := blockStore.Close(); derr != nil {
-			logger.Error("Failed to close blockstore", "err", derr)
-			// Set the return value
-			err = derr
-		}
-	}()
-
-	if err != nil {
-		return err
-	}
-
-	if !blockStore.IsEmpty() {
-		return fmt.Errorf("blockstore not empty, trying to initialize non empty state")
-	}
-
-	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
-		DiscardABCIResponses: config.Storage.DiscardABCIResponses,
-	})
-
-	defer func() {
-		if derr := stateStore.Close(); derr != nil {
-			logger.Error("Failed to close statestore", "err", derr)
-			// Set the return value
-			err = derr
-		}
-	}()
-	state, err := stateStore.Load()
-	if err != nil {
-		return err
-	}
-
-	if !state.IsEmpty() {
-		return fmt.Errorf("state not empty, trying to initialize non empty state")
-	}
-
-	genState, _, err := LoadStateFromDBOrGenesisDocProvider(stateDB, genProvider)
-	if err != nil {
-		return err
-	}
-
-	stateProvider, err := statesync.NewLightClientStateProvider(
-		ctx,
-		genState.ChainID, genState.Version, genState.InitialHeight,
-		config.StateSync.RPCServers, light.TrustOptions{
-			Period: config.StateSync.TrustPeriod,
-			Height: config.StateSync.TrustHeight,
-			Hash:   config.StateSync.TrustHashBytes(),
-		}, logger.With("module", "light"))
-	if err != nil {
-		return fmt.Errorf("failed to set up light client state provider: %w", err)
-	}
-
-	state, err = stateProvider.State(ctx, height)
-	if err != nil {
-		return err
-	}
-	if appHash == nil {
-		logger.Info("warning: cannot verify appHash. Verification will happen when node boots up!")
-	} else {
-		if !bytes.Equal(appHash, state.AppHash) {
-			if err := blockStore.Close(); err != nil {
-				logger.Error("failed to close blockstore: %w", err)
-			}
-			if err := stateStore.Close(); err != nil {
-				logger.Error("failed to close statestore: %w", err)
-			}
-			return fmt.Errorf("the app hash returned by the light client does not match the provided appHash, expected %X, got %X", state.AppHash, appHash)
-		}
-	}
-
-	commit, err := stateProvider.Commit(ctx, height)
-	if err != nil {
-		return err
-	}
-
-	if err = stateStore.Bootstrap(state); err != nil {
-		return err
-	}
-
-	err = blockStore.SaveSeenCommit(state.LastBlockHeight, commit)
-	if err != nil {
-		return err
-	}
-
-	// Once the stores are bootstrapped, we need to set the height at which the node has finished
-	// statesyncing. This will allow the blocksync reactor to fetch blocks at a proper height.
-	// In case this operation fails, it is equivalent to a failure in  online state sync where the operator
-	// needs to manually delete the state and blockstores and rerun the bootstrapping process.
-	err = stateStore.SetOfflineStateSyncHeight(state.LastBlockHeight)
-	if err != nil {
-		return fmt.Errorf("failed to set synced height: %w", err)
-	}
-
-	return err
-}
-
-//------------------------------------------------------------------------------
-
-// NewNode returns a new, ready to go, CometBFT Node.
-func NewNode(config *cfg.Config,
-	pubKey crypto.PubKey,
-	nodeKey *p2p.NodeKey,
-	clientCreator proxy.ClientCreator,
-	genesisDocProvider GenesisDocProvider,
-	dbProvider cfg.DBProvider,
-	metricsProvider MetricsProvider,
-	logger log.Logger,
-	options ...Option,
-) (*Node, error) {
-	return NewNodeWithContext(context.TODO(), config, pubKey,
-		nodeKey, clientCreator, genesisDocProvider, dbProvider,
-		metricsProvider, logger, options...)
-}
-
+// ------------------------------------------------------------------------------
 // NewNodeWithContext is cancellable version of NewNode.
-func NewNodeWithContext(ctx context.Context,
+func NewNodesWithContext(ctx context.Context,
 	config *cfg.Config,
-	pubKey crypto.PubKey,
+	// pubKey crypto.PubKey,
+	// listPubKey []crypto.PubKey,
 	nodeKey *p2p.NodeKey,
 	clientCreator proxy.ClientCreator,
-	genesisDocProvider GenesisDocProvider,
+	genesisDocProvider node.GenesisDocProvider,
 	dbProvider cfg.DBProvider,
-	metricsProvider MetricsProvider,
+	metricsProvider node.MetricsProvider,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
-	fmt.Println("startwwithcontexttttttt")
 	blockStore, stateDB, err := initDBs(config, dbProvider)
 	if err != nil {
 		return nil, err
@@ -305,10 +110,14 @@ func NewNodeWithContext(ctx context.Context,
 		DiscardABCIResponses: config.Storage.DiscardABCIResponses,
 	})
 
-	state, genDoc, err := LoadStateFromDBOrGenesisDocProvider(stateDB, genesisDocProvider)
+	state, genDoc, err := node.LoadStateFromDBOrGenesisDocProvider(stateDB, genesisDocProvider)
 	if err != nil {
 		return nil, err
 	}
+	pubKey, listPubKey := getVal(state.Validators.Validators)
+
+	//
+	// state.NextValidators.GetByAddress()
 
 	csMetrics, p2pMetrics, memplMetrics, smMetrics, abciMetrics, bsMetrics, ssMetrics := metricsProvider(genDoc.ChainID)
 
@@ -373,7 +182,8 @@ func NewNodeWithContext(ctx context.Context,
 
 	// Determine whether we should do block sync. This must happen after the handshake, since the
 	// app may modify the validator set, specifying ourself as the only validator.
-	blockSync := !onlyValidatorIsUs(state, pubKey)
+	// blockSync := !onlyValidatorIsUs(state, pubKey)
+	blockSync := false
 
 	logNodeStartupInfo(state, pubKey, logger, consensusLogger)
 
@@ -415,7 +225,7 @@ func NewNodeWithContext(ctx context.Context,
 	fmt.Println("-------start consensusReactor")
 	consensusReactor, consensusState := createConsensusReactor(
 		config, state, blockExec, blockStore, mempool, evidencePool,
-		pubKey, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
+		pubKey, listPubKey, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
 	)
 
 	err = stateStore.SetOfflineStateSyncHeight(0)
@@ -486,14 +296,15 @@ func NewNodeWithContext(ctx context.Context,
 	addrBook.AddPrivateIDs(splitAndTrimEmpty(config.P2P.PrivatePeerIDs, ",", " "))
 
 	node := &Node{
-		config:     config,
-		genesisDoc: genDoc,
-		// privValidator: privValidator,
-		pubKey: pubKey,
+		config:       config,
+		genesisDoc:   genDoc,
+		current_node: pubKey,
+		pubkey:       pubKey,
+		listPubKey:   listPubKey,
 
-		transport: transport,
+		// network
 		sw:        sw,
-		addrBook:  addrBook,
+		transport: transport,
 		nodeInfo:  nodeInfo,
 		nodeKey:   nodeKey,
 
@@ -521,8 +332,18 @@ func NewNodeWithContext(ctx context.Context,
 		option(node)
 	}
 
-	fmt.Println("-------start node")
+	fmt.Println("-------start node, //////////////////////////////////////////////")
 	return node, nil
+}
+
+func getVal(validators []*types.Validator) (crypto.PubKey, []crypto.PubKey) {
+	var listPubKey []crypto.PubKey
+
+	for _, val := range validators {
+		listPubKey = append(listPubKey, val.PubKey)
+	}
+
+	return validators[0].PubKey, listPubKey
 }
 
 // OnStart starts the Node. It implements service.Service.
@@ -568,7 +389,7 @@ func (n *Node) OnStart() error {
 
 	n.isListening = true
 
-	// Start the switch (the P2P server).
+	// // Start the switch (the P2P server).
 	fmt.Println("-------start p2p switch")
 	err = n.sw.Start()
 	if err != nil {
@@ -685,7 +506,7 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		ConsensusState: n.consensusState,
 		P2PPeers:       n.sw,
 		P2PTransport:   n,
-		PubKey:         n.nodeKey.PubKey(),
+		PubKey:         n.pubkey,
 
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,

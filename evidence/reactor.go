@@ -246,7 +246,7 @@ func evidenceListFromProto(m proto.Message) ([]types.Evidence, error) {
 
 	for i, ev := range evis {
 		if err := ev.ValidateBasic(); err != nil {
-			return nil, fmt.Errorf("invalid evidence (#%d): %v", i, err)
+			return nil, fmt.Errorf("invalid evidence 1111 (#%d): %v", i, err)
 		}
 	}
 
