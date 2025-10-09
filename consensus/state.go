@@ -103,7 +103,8 @@ type State struct {
 	state sm.State // State until height-1.
 	// privValidator pubkey, memoized for the duration of one block
 	// to avoid extra requests to HSM
-	privValidatorPubKey crypto.PubKey
+	privValidatorPubKey     crypto.PubKey
+	listprivValidatorPubKey []crypto.PubKey
 
 	// state changes may be triggered by: msgs from peers,
 	// msgs from ourself, or by timeouts
@@ -299,6 +300,13 @@ func (cs *State) SetPrivValidator(pub crypto.PubKey) {
 	// }
 }
 
+func (cs *State) SetListPrivValidator(pub []crypto.PubKey) {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+
+	cs.listprivValidatorPubKey = pub
+}
+
 // SetTimeoutTicker sets the local timer. It may be useful to overwrite for
 // testing.
 func (cs *State) SetTimeoutTicker(timeoutTicker TimeoutTicker) {
@@ -399,8 +407,10 @@ func (cs *State) OnStart() error {
 	}
 
 	// Double Signing Risk Reduction
-	if err := cs.checkDoubleSigningRisk(cs.Height); err != nil {
-		return err
+	for _, pukey := range cs.listprivValidatorPubKey {
+		if err := cs.checkDoubleSigningRisk(pukey, cs.Height); err != nil {
+			return err
+		}
 	}
 
 	// now start the receiveRoutine
@@ -1189,6 +1199,9 @@ func (cs *State) enterPropose(height int64, round int32) {
 		logger.Error("propose step; empty priv validator public key", "err", errPubKeyIsNotSet)
 		return
 	}
+	fmt.Println("enterPropose: 11111")
+	proposer := cs.Validators.GetProposer().Address
+	cs.setProposer(proposer)
 
 	address := cs.privValidatorPubKey.Address()
 
@@ -2414,6 +2427,50 @@ func (cs *State) signVote(
 	return vote, err
 }
 
+func (cs *State) signVotesForAll(msgType cmtproto.SignedMsgType,
+	hash []byte,
+	header types.PartSetHeader,
+	block *types.Block,
+) error {
+	for _, pubkey := range cs.listprivValidatorPubKey {
+		addr := pubkey.Address()
+		valIdx, _ := cs.Validators.GetByAddress(addr)
+
+		vote := &types.Vote{
+			ValidatorAddress: addr,
+			ValidatorIndex:   valIdx,
+			Height:           cs.Height,
+			Round:            cs.Round,
+			Timestamp:        cs.voteTime(),
+			Type:             msgType,
+			BlockID:          types.BlockID{Hash: hash, PartSetHeader: header},
+		}
+
+		extEnabled := cs.state.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height)
+		if msgType == cmtproto.PrecommitType && !vote.BlockID.IsZero() {
+			// if the signedMessage type is for a non-nil precommit, add
+			// VoteExtension
+			if extEnabled {
+				ext, err := cs.blockExec.ExtendVote(context.TODO(), vote, block, cs.state)
+				if err != nil {
+					return err
+				}
+				vote.Extension = ext
+			}
+		}
+		// vp := vote.ToProto()
+		// if err := pv.SignVote(cs.state.ChainID, vp); err != nil {
+		// 	return err
+		// }
+		vote.Signature = []byte{12}
+
+		// bơm như thể là message đến từ peer (peerID rỗng/self cũng được)
+		cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, ""})
+		// hoặc gọi trực tiếp cs.addVote(vote, "") nếu muốn
+	}
+	return nil
+}
+
 func (cs *State) voteTime() time.Time {
 	now := cmttime.Now()
 	minVoteTime := now
@@ -2459,19 +2516,20 @@ func (cs *State) signAddVote(
 	}
 
 	// TODO: pass pubKey to signVote
-	vote, err := cs.signVote(msgType, hash, header, block)
-	if err != nil {
-		cs.Logger.Error("failed signing vote", "height", cs.Height, "round", cs.Round, "vote", vote, "err", err)
-		return
-	}
-	hasExt := len(vote.ExtensionSignature) > 0
-	extEnabled := cs.state.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height)
-	if vote.Type == cmtproto.PrecommitType && !vote.BlockID.IsZero() && hasExt != extEnabled {
-		panic(fmt.Errorf("vote extension absence/presence does not match extensions enabled %t!=%t, height %d, type %v",
-			hasExt, extEnabled, vote.Height, vote.Type))
-	}
-	cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, ""})
-	cs.Logger.Debug("signed and pushed vote", "height", cs.Height, "round", cs.Round, "vote", vote)
+	cs.signVotesForAll(msgType, hash, header, block)
+	// vote, err := cs.signVote(msgType, hash, header, block)
+	// if err != nil {
+	// 	cs.Logger.Error("failed signing vote", "height", cs.Height, "round", cs.Round, "vote", vote, "err", err)
+	// 	return
+	// }
+	// hasExt := len(vote.ExtensionSignature) > 0
+	// extEnabled := cs.state.ConsensusParams.ABCI.VoteExtensionsEnabled(vote.Height)
+	// if vote.Type == cmtproto.PrecommitType && !vote.BlockID.IsZero() && hasExt != extEnabled {
+	// 	panic(fmt.Errorf("vote extension absence/presence does not match extensions enabled %t!=%t, height %d, type %v",
+	// 		hasExt, extEnabled, vote.Height, vote.Type))
+	// }
+	// cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, ""})
+	// cs.Logger.Debug("signed and pushed vote", "height", cs.Height, "round", cs.Round, "vote", vote)
 }
 
 // updatePrivValidatorPubKey get's the private validator public key and
@@ -2491,9 +2549,9 @@ func (cs *State) signAddVote(
 // }
 
 // look back to check existence of the node's consensus votes before joining consensus
-func (cs *State) checkDoubleSigningRisk(height int64) error {
-	if cs.privValidatorPubKey != nil && cs.config.DoubleSignCheckHeight > 0 && height > 0 {
-		valAddr := cs.privValidatorPubKey.Address()
+func (cs *State) checkDoubleSigningRisk(pubkey crypto.PubKey, height int64) error {
+	if pubkey != nil && cs.config.DoubleSignCheckHeight > 0 && height > 0 {
+		valAddr := pubkey.Address()
 		doubleSignCheckHeight := cs.config.DoubleSignCheckHeight
 		if doubleSignCheckHeight > height {
 			doubleSignCheckHeight = height

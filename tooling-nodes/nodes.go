@@ -69,6 +69,16 @@ type Node struct {
 
 	current_node crypto.PubKey
 	config       *cfg.Config
+	listPubKey   []crypto.PubKey
+	quePubKey    []crypto.PubKey
+	pubkey       crypto.PubKey
+
+	// network
+	sw          *p2p.Switch // p2p connections
+	transport   *p2p.MultiplexTransport
+	isListening bool
+	nodeInfo    p2p.NodeInfo
+	nodeKey     *p2p.NodeKey
 
 	// config
 	genesisDoc *types.GenesisDoc // initial validator set
@@ -105,6 +115,7 @@ type Option func(*Node)
 func NewNodesWithContext(ctx context.Context,
 	config *cfg.Config,
 	pubKey crypto.PubKey,
+	listPubKey []crypto.PubKey,
 	nodeKey *p2p.NodeKey,
 	configNodes []ConfigNode,
 	nodeKeys []NodeKeyP2P,
@@ -196,6 +207,7 @@ func NewNodesWithContext(ctx context.Context,
 	// Determine whether we should do block sync. This must happen after the handshake, since the
 	// app may modify the validator set, specifying ourself as the only validator.
 	blockSync := !onlyValidatorIsUs(state, pubKey)
+	blockSync = false
 
 	logNodeStartupInfo(state, pubKey, logger, consensusLogger)
 
@@ -237,7 +249,7 @@ func NewNodesWithContext(ctx context.Context,
 	fmt.Println("-------start consensusReactor")
 	consensusReactor, consensusState := createConsensusReactor(
 		config, state, blockExec, blockStore, mempool, evidencePool,
-		pubKey, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
+		pubKey, listPubKey, csMetrics, stateSync || blockSync, eventBus, consensusLogger, offlineStateSyncHeight,
 	)
 
 	err = stateStore.SetOfflineStateSyncHeight(0)
@@ -311,6 +323,14 @@ func NewNodesWithContext(ctx context.Context,
 		config:       config,
 		genesisDoc:   genDoc,
 		current_node: pubKey,
+		pubkey:       pubKey,
+		listPubKey:   listPubKey,
+
+		// network
+		sw:        sw,
+		transport: transport,
+		nodeInfo:  nodeInfo,
+		nodeKey:   nodeKey,
 
 		stateStore:       stateStore,
 		blockStore:       blockStore,
@@ -336,7 +356,7 @@ func NewNodesWithContext(ctx context.Context,
 		option(node)
 	}
 
-	fmt.Println("-------start node")
+	fmt.Println("-------start node, //////////////////////////////////////////////")
 	return node, nil
 }
 
@@ -372,29 +392,29 @@ func (n *Node) OnStart() error {
 	}
 
 	// Start the transport.
-	// fmt.Println("-------start p2p transport")
-	// addr, err := p2p.NewNetAddressString(p2p.IDAddressString(n.nodeKey.ID(), n.config.P2P.ListenAddress))
-	// if err != nil {
-	// 	return err
-	// }
-	// if err := n.transport.Listen(*addr); err != nil {
-	// 	return err
-	// }
+	fmt.Println("-------start p2p transport")
+	addr, err := p2p.NewNetAddressString(p2p.IDAddressString(n.nodeKey.ID(), n.config.P2P.ListenAddress))
+	if err != nil {
+		return err
+	}
+	if err := n.transport.Listen(*addr); err != nil {
+		return err
+	}
 
-	// n.isListening = true
+	n.isListening = true
 
 	// // Start the switch (the P2P server).
-	// fmt.Println("-------start p2p switch")
-	// err = n.sw.Start()
-	// if err != nil {
-	// 	return err
-	// }
+	fmt.Println("-------start p2p switch")
+	err = n.sw.Start()
+	if err != nil {
+		return err
+	}
 	fmt.Println("-------start p2p switch1.5")
 	// Always connect to persistent peers
-	// err = n.sw.DialPeersAsync(splitAndTrimEmpty(n.config.P2P.PersistentPeers, ",", " "))
-	// if err != nil {
-	// 	return fmt.Errorf("could not dial peers from persistent_peers field: %w", err)
-	// }
+	err = n.sw.DialPeersAsync(splitAndTrimEmpty(n.config.P2P.PersistentPeers, ",", " "))
+	if err != nil {
+		return fmt.Errorf("could not dial peers from persistent_peers field: %w", err)
+	}
 
 	fmt.Println("-------start p2p switch2")
 	// Run state sync
@@ -428,16 +448,16 @@ func (n *Node) OnStop() {
 		n.Logger.Error("Error closing indexerService", "err", err)
 	}
 
-	// // now stop the reactors
-	// if err := n.sw.Stop(); err != nil {
-	// 	n.Logger.Error("Error closing switch", "err", err)
-	// }
+	// now stop the reactors
+	if err := n.sw.Stop(); err != nil {
+		n.Logger.Error("Error closing switch", "err", err)
+	}
 
-	// if err := n.transport.Close(); err != nil {
-	// 	n.Logger.Error("Error closing transport", "err", err)
-	// }
+	if err := n.transport.Close(); err != nil {
+		n.Logger.Error("Error closing transport", "err", err)
+	}
 
-	// n.isListening = false
+	n.isListening = false
 
 	// finally stop the listeners / external services
 	for _, l := range n.rpcListeners {
@@ -498,9 +518,9 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		BlockStore:     n.blockStore,
 		EvidencePool:   n.evidencePool,
 		ConsensusState: n.consensusState,
-		// P2PPeers:       n.sw,
-		// P2PTransport:   n,
-		PubKey: n.current_node,
+		P2PPeers:       n.sw,
+		P2PTransport:   n,
+		PubKey:         n.pubkey,
 
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,
@@ -682,10 +702,10 @@ func (n *Node) startPprofServer() *http.Server {
 	return srv
 }
 
-// // Switch returns the Node's Switch.
-// func (n *Node) Switch() *p2p.Switch {
-// 	return n.sw
-// }
+// Switch returns the Node's Switch.
+func (n *Node) Switch() *p2p.Switch {
+	return n.sw
+}
 
 // BlockStore returns the Node's BlockStore.
 func (n *Node) BlockStore() *store.BlockStore {
@@ -751,14 +771,14 @@ func (n *Node) Listeners() []string {
 	}
 }
 
-// func (n *Node) IsListening() bool {
-// 	return n.isListening
-// }
+func (n *Node) IsListening() bool {
+	return n.isListening
+}
 
-// // NodeInfo returns the Node's Info from the Switch.
-// func (n *Node) NodeInfo() p2p.NodeInfo {
-// 	return n.nodeInfo
-// }
+// NodeInfo returns the Node's Info from the Switch.
+func (n *Node) NodeInfo() p2p.NodeInfo {
+	return n.nodeInfo
+}
 
 func makeNodeInfo(
 	config *cfg.Config,

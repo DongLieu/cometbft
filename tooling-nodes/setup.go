@@ -286,6 +286,7 @@ func createConsensusReactor(config *cfg.Config,
 	mempool mempl.Mempool,
 	evidencePool *evidence.Pool,
 	pub crypto.PubKey,
+	listpub []crypto.PubKey,
 	csMetrics *cs.Metrics,
 	waitSync bool,
 	eventBus *types.EventBus,
@@ -305,6 +306,7 @@ func createConsensusReactor(config *cfg.Config,
 	consensusState.SetLogger(consensusLogger)
 	if pub != nil {
 		consensusState.SetPrivValidator(pub)
+		consensusState.SetListPrivValidator(listpub)
 	}
 	consensusReactor := cs.NewReactor(consensusState, waitSync, cs.ReactorMetrics(csMetrics))
 	consensusReactor.SetLogger(consensusLogger)

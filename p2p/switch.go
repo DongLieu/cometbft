@@ -234,7 +234,9 @@ func (sw *Switch) SetNodeKey(nodeKey *NodeKey) {
 func (sw *Switch) OnStart() error {
 	// Start reactors
 	// start mempool, syc state....
+	fmt.Println("/////////////////////Switch onstart ")
 	for _, reactor := range sw.reactors {
+		fmt.Println("/////////////////////Switch onstart ")
 		err := reactor.Start()
 		if err != nil {
 			return fmt.Errorf("failed to start %v: %w", reactor, err)
