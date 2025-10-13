@@ -14,6 +14,7 @@ import (
 	"github.com/cometbft/cometbft/rpc/core"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
+	"github.com/cometbft/cometbft/tooling-nodes"
 	"github.com/cometbft/cometbft/types"
 )
 
@@ -46,6 +47,20 @@ type Local struct {
 
 // NewLocal configures a client that calls the Node directly.
 func New(node *nm.Node) *Local {
+	env, err := node.ConfigureRPC()
+	if err != nil {
+		node.Logger.Error("Error configuring RPC", "err", err)
+	}
+	return &Local{
+		EventBus: node.EventBus(),
+		Logger:   log.NewNopLogger(),
+		ctx:      &rpctypes.Context{},
+		env:      env,
+	}
+}
+
+// NewLocal configures a client that calls the Node directly.
+func NewToolingLocal(node *tooling_nodes.Node) *Local {
 	env, err := node.ConfigureRPC()
 	if err != nil {
 		node.Logger.Error("Error configuring RPC", "err", err)

@@ -20,7 +20,7 @@ type SocketDialer func() (net.Conn, error)
 
 // DialTCPFn dials the given tcp addr, using the given timeoutReadWrite and
 // privKey for the authenticated encryption handshake.
-func DialTCPFn(addr string, timeoutReadWrite time.Duration, privKey crypto.PrivKey) SocketDialer {
+func DialTCPFn(addr string, timeoutReadWrite time.Duration, pubKey crypto.PubKey) SocketDialer {
 	return func() (net.Conn, error) {
 		conn, err := cmtnet.Connect(addr)
 		if err == nil {
@@ -28,7 +28,7 @@ func DialTCPFn(addr string, timeoutReadWrite time.Duration, privKey crypto.PrivK
 			err = conn.SetDeadline(deadline)
 		}
 		if err == nil {
-			conn, err = p2pconn.MakeSecretConnection(conn, privKey)
+			conn, err = p2pconn.MakeSecretConnection(conn, pubKey)
 		}
 		return conn, err
 	}
