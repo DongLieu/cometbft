@@ -68,8 +68,8 @@ type Node struct {
 	stateStore        sm.Store
 	blockStore        *store.BlockStore // store the blockchain to disk
 	pruner            *sm.Pruner
-	bcReactor         p2p.Reactor // for block-syncing
-	mempoolReactor    p2p.Reactor // for gossipping transactions
+	bcReactor         p2p.Reactor        // for block-syncing
+	mempoolReactor    waitSyncP2PReactor // for gossipping transactions
 	mempool           mempl.Mempool
 	stateSync         bool                    // whether the node should state sync on startup
 	stateSyncReactor  *statesync.Reactor      // for hosting and restoring state sync snapshots
@@ -86,6 +86,12 @@ type Node struct {
 	indexerService    *txindex.IndexerService
 	prometheusSrv     *http.Server
 	pprofSrv          *http.Server
+}
+
+type waitSyncP2PReactor interface {
+	p2p.Reactor
+	// required by RPC service
+	WaitSync() bool
 }
 
 // Option sets a parameter for the node.
@@ -563,6 +569,7 @@ func (n *Node) ConfigureRPC() (*rpccore.Environment, error) {
 		GenDoc:           n.genesisDoc,
 		TxIndexer:        n.txIndexer,
 		BlockIndexer:     n.blockIndexer,
+		MempoolReactor:   n.mempoolReactor,
 		ConsensusReactor: n.consensusReactor,
 		EventBus:         n.eventBus,
 		Mempool:          n.mempool,

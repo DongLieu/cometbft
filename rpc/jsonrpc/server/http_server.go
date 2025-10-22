@@ -213,6 +213,7 @@ func RecoverAndLogHandler(handler http.Handler, logger log.Logger) http.Handler 
 					logger.Error("panic in RPC HTTP handler", "err", e, "stack", string(debug.Stack()))
 
 					res := types.RPCInternalError(types.JSONRPCIntID(-1), err)
+					fmt.Println("makejson loi r 222")
 					if wErr := WriteRPCResponseHTTPError(rww, http.StatusInternalServerError, res); wErr != nil {
 						logger.Error("failed to write response", "err", wErr)
 					}

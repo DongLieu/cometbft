@@ -110,6 +110,7 @@ func makeJSONRPCHandler(funcMap map[string]*RPCFunc, logger log.Logger) http.Han
 			result, err := unreflectResult(returns)
 			if err != nil {
 				responses = append(responses, types.RPCInternalError(request.ID, err))
+				fmt.Println("makejson loi r")
 				continue
 			}
 			responses = append(responses, types.NewRPCSuccessResponse(request.ID, result))

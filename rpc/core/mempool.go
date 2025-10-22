@@ -12,7 +12,17 @@ import (
 	"github.com/cometbft/cometbft/types"
 )
 
-var ErrEndpointClosedCatchingUp = errors.New("endpoint is closed while node is catching up")
+var (
+	ErrEndpointClosedCatchingUp = errors.New("endpoint is closed while node is catching up")
+	ErrMempoolUnavailable       = errors.New("mempool is not available")
+)
+
+func (env *Environment) ensureMempoolAvailable() error {
+	if env.Mempool == nil || env.MempoolReactor == nil {
+		return ErrMempoolUnavailable
+	}
+	return nil
+}
 
 // -----------------------------------------------------------------------------
 // NOTE: tx should be signed, but this is only checked at the app level (not by CometBFT!)
@@ -21,6 +31,9 @@ var ErrEndpointClosedCatchingUp = errors.New("endpoint is closed while node is c
 // CheckTx nor transaction results.
 // More: https://docs.cometbft.com/main/rpc/#/Tx/broadcast_tx_async
 func (env *Environment) BroadcastTxAsync(_ *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
+	if err := env.ensureMempoolAvailable(); err != nil {
+		return nil, err
+	}
 	if env.MempoolReactor.WaitSync() {
 		return nil, ErrEndpointClosedCatchingUp
 	}
@@ -38,6 +51,9 @@ func (env *Environment) BroadcastTxAsync(_ *rpctypes.Context, tx types.Tx) (*cty
 // the transaction result.
 // More: https://docs.cometbft.com/main/rpc/#/Tx/broadcast_tx_sync
 func (env *Environment) BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
+	if err := env.ensureMempoolAvailable(); err != nil {
+		return nil, err
+	}
 	if env.MempoolReactor.WaitSync() {
 		return nil, ErrEndpointClosedCatchingUp
 	}
@@ -82,6 +98,9 @@ func (env *Environment) BroadcastTxSync(ctx *rpctypes.Context, tx types.Tx) (*ct
 // BroadcastTxCommit returns with the responses from CheckTx and ExecTxResult.
 // More: https://docs.cometbft.com/main/rpc/#/Tx/broadcast_tx_commit
 func (env *Environment) BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
+	if err := env.ensureMempoolAvailable(); err != nil {
+		return nil, err
+	}
 	if env.MempoolReactor.WaitSync() {
 		return nil, ErrEndpointClosedCatchingUp
 	}
@@ -185,6 +204,9 @@ func (env *Environment) BroadcastTxCommit(ctx *rpctypes.Context, tx types.Tx) (*
 
 // UnconfirmedTx gets unconfirmed transaction by hash.
 func (env *Environment) UnconfirmedTx(_ *rpctypes.Context, hash []byte) (*ctypes.ResultUnconfirmedTx, error) {
+	if err := env.ensureMempoolAvailable(); err != nil {
+		return nil, err
+	}
 	return &ctypes.ResultUnconfirmedTx{
 		Tx: env.Mempool.GetTxByHash(hash),
 	}, nil
@@ -194,6 +216,9 @@ func (env *Environment) UnconfirmedTx(_ *rpctypes.Context, hash []byte) (*ctypes
 // including their number.
 // More: https://docs.cometbft.com/main/rpc/#/Info/unconfirmed_txs
 func (env *Environment) UnconfirmedTxs(_ *rpctypes.Context, limitPtr *int) (*ctypes.ResultUnconfirmedTxs, error) {
+	if err := env.ensureMempoolAvailable(); err != nil {
+		return nil, err
+	}
 	// reuse per_page validator
 	limit := env.validatePerPage(limitPtr)
 
@@ -209,6 +234,9 @@ func (env *Environment) UnconfirmedTxs(_ *rpctypes.Context, limitPtr *int) (*cty
 // NumUnconfirmedTxs gets number of unconfirmed transactions.
 // More: https://docs.cometbft.com/main/rpc/#/Info/num_unconfirmed_txs
 func (env *Environment) NumUnconfirmedTxs(*rpctypes.Context) (*ctypes.ResultUnconfirmedTxs, error) {
+	if err := env.ensureMempoolAvailable(); err != nil {
+		return nil, err
+	}
 	return &ctypes.ResultUnconfirmedTxs{
 		Count:      env.Mempool.Size(),
 		Total:      env.Mempool.Size(),

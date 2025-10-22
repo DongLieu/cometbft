@@ -222,7 +222,7 @@ func createMempoolAndMempoolReactor(
 	memplMetrics *mempl.Metrics,
 	logger log.Logger,
 	appInfoResponse *abci.InfoResponse,
-) (mempl.Mempool, p2p.Reactor) {
+) (mempl.Mempool, waitSyncP2PReactor) {
 	switch config.Mempool.Type {
 	// allow empty string for backward compatibility
 	case cfg.MempoolTypeFlood, "":
@@ -230,12 +230,14 @@ func createMempoolAndMempoolReactor(
 		if err != nil {
 			panic(fmt.Sprintf("could not get lanes info from app: %s", err))
 		}
+
 		logger = logger.With("module", "mempool")
 		mp := mempl.NewCListMempool(
 			config.Mempool,
 			proxyApp.Mempool(),
 			lanesInfo,
 			state.LastBlockHeight,
+			mempl.WithMetrics(memplMetrics),
 			mempl.WithPreCheck(sm.TxPreCheck(state)),
 			mempl.WithPostCheck(sm.TxPostCheck(state)),
 		)
