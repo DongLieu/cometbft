@@ -179,7 +179,7 @@ func ConnectStarSwitches(c int) func([]*Switch, int, int) {
 }
 
 func (sw *Switch) addPeerWithConnection(conn net.Conn) error {
-	pc, err := testInboundPeerConn(conn, sw.config, sw.nodeKey.PrivKey)
+	pc, err := testInboundPeerConn(conn, sw.config, sw.nodeKey.PubKey())
 	if err != nil {
 		if err := conn.Close(); err != nil {
 			sw.Logger.Error("Error closing connection", "err", err)
@@ -270,16 +270,16 @@ func MakeSwitch(
 func testInboundPeerConn(
 	conn net.Conn,
 	config *config.P2PConfig,
-	ourNodePrivKey crypto.PrivKey,
+	pubkey crypto.PubKey,
 ) (peerConn, error) {
-	return testPeerConn(conn, config, false, false, ourNodePrivKey, nil)
+	return testPeerConn(conn, config, false, false, pubkey, nil)
 }
 
 func testPeerConn(
 	rawConn net.Conn,
 	cfg *config.P2PConfig,
 	outbound, persistent bool,
-	ourNodePrivKey crypto.PrivKey,
+	pubkey crypto.PubKey,
 	socketAddr *NetAddress,
 ) (pc peerConn, err error) {
 	conn := rawConn
@@ -291,7 +291,7 @@ func testPeerConn(
 	}
 
 	// Encrypt connection
-	conn, err = upgradeSecretConn(conn, cfg.HandshakeTimeout, ourNodePrivKey)
+	conn, err = upgradeSecretConn(conn, cfg.HandshakeTimeout, pubkey)
 	if err != nil {
 		return pc, fmt.Errorf("error creating peer: %w", err)
 	}

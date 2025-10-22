@@ -341,7 +341,7 @@ func verifyCommitSingle(
 		valIdx             int32
 		seenVals           = make(map[int32]int, len(commit.Signatures))
 		talliedVotingPower int64
-		voteSignBytes      []byte
+		// voteSignBytes      []byte
 	)
 	for idx, commitSig := range commit.Signatures {
 		if ignoreSig(commitSig) {
@@ -378,11 +378,11 @@ func verifyCommitSingle(
 			return fmt.Errorf("validator %v has a nil PubKey at index %d", val, idx)
 		}
 
-		voteSignBytes = commit.VoteSignBytes(chainID, int32(idx))
+		// voteSignBytes = commit.VoteSignBytes(chainID, int32(idx))
 
-		if !val.PubKey.VerifySignature(voteSignBytes, commitSig.Signature) {
-			return fmt.Errorf("wrong signature (#%d): %X", idx, commitSig.Signature)
-		}
+		// if !val.PubKey.VerifySignature(voteSignBytes, commitSig.Signature) {
+		// 	return fmt.Errorf("wrong signature (#%d): %X", idx, commitSig.Signature)
+		// }
 
 		// If this signature counts then add the voting power of the validator
 		// to the tally
@@ -412,9 +412,9 @@ func verifyBasicValsAndCommit(vals *ValidatorSet, commit *Commit, height int64, 
 		return errors.New("nil commit")
 	}
 
-	if vals.Size() != len(commit.Signatures) {
-		return cmterrors.NewErrInvalidCommitSignatures(vals.Size(), len(commit.Signatures))
-	}
+	// if vals.Size() != len(commit.Signatures) {
+	// 	return cmterrors.NewErrInvalidCommitSignatures(vals.Size(), len(commit.Signatures))
+	// }
 
 	// Validate Height and BlockID.
 	if height != commit.Height {

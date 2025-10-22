@@ -48,6 +48,7 @@ func PubKeyToID(pubKey crypto.PubKey) ID {
 // LoadOrGenNodeKey attempts to load the NodeKey from the given filePath. If
 // the file does not exist, it generates and saves a new NodeKey.
 func LoadOrGenNodeKey(filePath string) (*NodeKey, error) {
+	fmt.Println(filePath)
 	if cmtos.FileExists(filePath) {
 		nodeKey, err := LoadNodeKey(filePath)
 		if err != nil {

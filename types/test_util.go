@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmtversion "github.com/cometbft/cometbft/api/cometbft/version/v1"
+	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/version"
 )
 
@@ -48,14 +49,14 @@ func signAddVote(privVal PrivValidator, vote *Vote, voteSet *VoteSet) (bool, err
 	if vote.Type != voteSet.signedMsgType {
 		return false, fmt.Errorf("vote and voteset are of different types; %d != %d", vote.Type, voteSet.signedMsgType)
 	}
-	if _, err := SignAndCheckVote(vote, privVal, voteSet.ChainID(), voteSet.extensionsEnabled); err != nil {
+	if _, err := SignAndCheckVote(vote, voteSet.ChainID(), voteSet.extensionsEnabled); err != nil {
 		return false, err
 	}
 	return voteSet.AddVote(vote)
 }
 
 func MakeVote(
-	val PrivValidator,
+	pubKey crypto.PubKey,
 	chainID string,
 	valIndex int32,
 	height int64,
@@ -64,10 +65,10 @@ func MakeVote(
 	blockID BlockID,
 	votetime time.Time,
 ) (*Vote, error) {
-	pubKey, err := val.GetPubKey()
-	if err != nil {
-		return nil, err
-	}
+	// pubKey, err := val.GetPubKey()
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	vote := &Vote{
 		ValidatorAddress: pubKey.Address(),
@@ -80,7 +81,7 @@ func MakeVote(
 	}
 
 	extensionsEnabled := step == PrecommitType
-	if _, err := SignAndCheckVote(vote, val, chainID, extensionsEnabled); err != nil {
+	if _, err := SignAndCheckVote(vote, chainID, extensionsEnabled); err != nil {
 		return nil, err
 	}
 
@@ -89,7 +90,7 @@ func MakeVote(
 
 func MakeVoteNoError(
 	t *testing.T,
-	val PrivValidator,
+	pubKey crypto.PubKey,
 	chainID string,
 	valIndex int32,
 	height int64,
@@ -100,7 +101,7 @@ func MakeVoteNoError(
 ) *Vote {
 	t.Helper()
 
-	vote, err := MakeVote(val, chainID, valIndex, height, round, step, blockID, time)
+	vote, err := MakeVote(pubKey, chainID, valIndex, height, round, step, blockID, time)
 	require.NoError(t, err)
 	return vote
 }

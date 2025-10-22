@@ -417,7 +417,7 @@ func (mt *MultiplexTransport) upgrade(
 		}
 	}()
 
-	secretConn, err = upgradeSecretConn(c, mt.handshakeTimeout, mt.nodeKey.PrivKey)
+	secretConn, err = upgradeSecretConn(c, mt.handshakeTimeout, mt.nodeKey.PubKey())
 	if err != nil {
 		return nil, nil, ErrRejected{
 			conn:          c,
@@ -580,13 +580,13 @@ func handshake(
 func upgradeSecretConn(
 	c net.Conn,
 	timeout time.Duration,
-	privKey crypto.PrivKey,
+	pubKey crypto.PubKey,
 ) (*conn.SecretConnection, error) {
 	if err := c.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, err
 	}
 
-	sc, err := conn.MakeSecretConnection(c, privKey)
+	sc, err := conn.MakeSecretConnection(c, pubKey)
 	if err != nil {
 		return nil, err
 	}

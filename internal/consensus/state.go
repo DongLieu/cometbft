@@ -73,8 +73,8 @@ type State struct {
 	service.BaseService
 
 	// config details
-	config        *cfg.ConsensusConfig
-	privValidator types.PrivValidator // for signing votes
+	config *cfg.ConsensusConfig
+	// privValidator types.PrivValidator // for signing votes
 
 	// store blocks and commits
 	blockStore sm.BlockStore
@@ -95,7 +95,8 @@ type State struct {
 	state sm.State // State until height-1.
 	// privValidator pubkey, memoized for the duration of one block
 	// to avoid extra requests to HSM
-	privValidatorPubKey crypto.PubKey
+	privValidatorPubKey     crypto.PubKey
+	listprivValidatorPubKey []crypto.PubKey
 
 	// state changes may be triggered by: msgs from peers,
 	// msgs from ourself, or by timeouts
@@ -286,15 +287,21 @@ func (cs *State) GetValidators() (int64, []*types.Validator) {
 
 // SetPrivValidator sets the private validator account for signing votes. It
 // immediately requests pubkey and caches it.
-func (cs *State) SetPrivValidator(priv types.PrivValidator) {
+func (cs *State) SetPrivValidator(pub crypto.PubKey) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
 
-	cs.privValidator = priv
+	cs.privValidatorPubKey = pub
 
-	if err := cs.updatePrivValidatorPubKey(); err != nil {
-		cs.Logger.Error("Failed to get private validator pubkey", "err", err)
-	}
+	// if err := cs.updatePrivValidatorPubKey(); err != nil {
+	// 	cs.Logger.Error("Failed to get private validator pubkey", "err", err)
+	// }
+}
+func (cs *State) SetListPrivValidator(pub []crypto.PubKey) {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+
+	cs.listprivValidatorPubKey = pub
 }
 
 // SetTimeoutTicker sets the local timer. It may be useful to overwrite for
@@ -394,8 +401,10 @@ func (cs *State) OnStart() error {
 	}
 
 	// Double Signing Risk Reduction
-	if err := cs.checkDoubleSigningRisk(cs.Height); err != nil {
-		return err
+	for _, pukey := range cs.listprivValidatorPubKey {
+		if err := cs.checkDoubleSigningRisk(pukey, cs.Height); err != nil {
+			return err
+		}
 	}
 
 	// now start the receiveRoutine
@@ -1182,10 +1191,10 @@ func (cs *State) enterPropose(height int64, round int32) {
 	cs.scheduleTimeout(cs.config.Propose(round), height, round, cstypes.RoundStepPropose)
 
 	// Nothing more to do if we're not a validator
-	if cs.privValidator == nil {
-		logger.Debug("Propose step; not proposing since node is not a validator")
-		return
-	}
+	// if cs.privValidator == nil {
+	// 	logger.Debug("Propose step; not proposing since node is not a validator")
+	// 	return
+	// }
 
 	if cs.privValidatorPubKey == nil {
 		// If this node is a validator & proposer in the current round, it will
@@ -1193,6 +1202,8 @@ func (cs *State) enterPropose(height int64, round int32) {
 		logger.Error("Propose step; empty priv validator public key", "err", ErrPubKeyIsNotSet)
 		return
 	}
+	proposer := cs.Validators.GetProposer().Address
+	cs.setProposer(proposer)
 
 	addr := cs.privValidatorPubKey.Address()
 
@@ -1251,9 +1262,9 @@ func (cs *State) defaultDecideProposal(height int64, round int32) {
 	// Make proposal
 	propBlockID := types.BlockID{Hash: block.Hash(), PartSetHeader: blockParts.Header()}
 	proposal := types.NewProposal(height, round, cs.ValidRound, propBlockID, block.Header.Time)
-	p := proposal.ToProto()
-	if err := cs.privValidator.SignProposal(cs.state.ChainID, p); err == nil {
-		proposal.Signature = p.Signature
+	// p := proposal.ToProto()
+	if true {
+		proposal.Signature = []byte{12}
 
 		// send proposal and block parts on internal msg queue
 		cs.sendInternalMessage(msgInfo{&ProposalMessage{proposal}, "", cmttime.Now()})
@@ -1265,7 +1276,7 @@ func (cs *State) defaultDecideProposal(height int64, round int32) {
 
 		cs.Logger.Debug("Signed proposal", "height", height, "round", round, "proposal", proposal)
 	} else if !cs.replayMode {
-		cs.Logger.Error("Propose step; failed signing proposal", "height", height, "round", round, "err", err)
+		cs.Logger.Error("Propose step; failed signing proposal", "height", height, "round", round, "err", "err")
 	}
 }
 
@@ -1292,9 +1303,9 @@ func (cs *State) isProposalComplete() bool {
 // NOTE: keep it side-effect free for clarity.
 // CONTRACT: cs.privValidator is not nil.
 func (cs *State) createProposalBlock(ctx context.Context) (*types.Block, error) {
-	if cs.privValidator == nil {
-		return nil, ErrNilPrivValidator
-	}
+	// if cs.privValidator == nil {
+	// 	return nil, ErrNilPrivValidator
+	// }
 
 	// TODO(sergio): wouldn't it be easier if CreateProposalBlock accepted cs.LastCommit directly?
 	var lastExtCommit *types.ExtendedCommit
@@ -1425,14 +1436,14 @@ func (cs *State) defaultDoPrevote(height int64, round int32) {
 	}
 
 	// Validate proposal block, from consensus' perspective
-	err := cs.blockExec.ValidateBlock(cs.state, cs.ProposalBlock)
-	if err != nil {
-		// ProposalBlock is invalid, prevote nil.
-		logger.Error("prevote step: consensus deems this block invalid; prevoting nil",
-			"err", err)
-		cs.signAddVote(types.PrevoteType, nil, types.PartSetHeader{}, nil)
-		return
-	}
+	// err := cs.blockExec.ValidateBlock(cs.state, cs.ProposalBlock)
+	// if err != nil {
+	// 	// ProposalBlock is invalid, prevote nil.
+	// 	logger.Error("prevote step: consensus deems this block invalid; prevoting nil",
+	// 		"err", err)
+	// 	cs.signAddVote(types.PrevoteType, nil, types.PartSetHeader{}, nil)
+	// 	return
+	// }
 
 	/*
 		22: upon <PROPOSAL, h_p, round_p, v, −1> from proposer(h_p, round_p) while step_p = propose do
@@ -1936,9 +1947,9 @@ func (cs *State) finalizeCommit(height int64) {
 	fail.Fail() // XXX
 
 	// Private validator might have changed it's key pair => refetch pubkey.
-	if err := cs.updatePrivValidatorPubKey(); err != nil {
-		logger.Error("Failed to get private validator pubkey", "err", err)
-	}
+	// if err := cs.updatePrivValidatorPubKey(); err != nil {
+	// 	logger.Error("Failed to get private validator pubkey", "err", err)
+	// }
 
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.
@@ -1974,7 +1985,7 @@ func (cs *State) recordMetrics(height int64, block *types.Block) {
 				commitSize, valSetLen, block.Height, block.LastCommit.Signatures, cs.LastValidators.Validators))
 		}
 
-		if cs.privValidator != nil {
+		if true {
 			if cs.privValidatorPubKey == nil {
 				// Metrics won't be updated, but it's not critical.
 				cs.Logger.Error(fmt.Sprintf("recordMetrics: %v", ErrPubKeyIsNotSet))
@@ -2061,9 +2072,7 @@ func (cs *State) defaultSetProposal(proposal *types.Proposal, recvTime time.Time
 	p := proposal.ToProto()
 	// Verify signature
 	pubKey := cs.Validators.GetProposer().PubKey
-	if !pubKey.VerifySignature(
-		types.ProposalSignBytes(cs.state.ChainID, p), proposal.Signature,
-	) {
+	if !bytes.Equal(proposal.Signature, []byte{12}) {
 		return ErrInvalidProposalSignature
 	}
 
@@ -2549,12 +2558,54 @@ func (cs *State) signVote(
 		}
 	}
 
-	recoverable, err := types.SignAndCheckVote(vote, cs.privValidator, cs.state.ChainID, extEnabled && (msgType == types.PrecommitType))
+	recoverable, err := types.SignAndCheckVote(vote, cs.state.ChainID, extEnabled && (msgType == cmtproto.PrecommitType))
 	if err != nil && !recoverable {
 		panic(fmt.Sprintf("non-recoverable error when signing vote %v: %v", vote, err))
 	}
 
 	return vote, err
+}
+
+func (cs *State) signVotesForAll(msgType cmtproto.SignedMsgType,
+	hash []byte,
+	header types.PartSetHeader,
+	block *types.Block,
+) error {
+	for _, pubkey := range cs.listprivValidatorPubKey {
+		addr := pubkey.Address()
+		valIdx, _ := cs.Validators.GetByAddress(addr)
+
+		vote := &types.Vote{
+			ValidatorAddress: addr,
+			ValidatorIndex:   valIdx,
+			Height:           cs.Height,
+			Round:            cs.Round,
+			Timestamp:        cs.voteTime(cs.Height),
+			Type:             msgType,
+			BlockID:          types.BlockID{Hash: hash, PartSetHeader: header},
+		}
+
+		extEnabled := cs.state.ConsensusParams.Feature.VoteExtensionsEnabled(vote.Height)
+		if msgType == cmtproto.PrecommitType && !vote.BlockID.IsNil() {
+			// if the signedMessage type is for a non-nil precommit, add
+			// VoteExtension
+			if extEnabled {
+				ext, err := cs.blockExec.ExtendVote(context.TODO(), vote, block, cs.state)
+				if err != nil {
+					return err
+				}
+				vote.Extension = ext
+			}
+		}
+		// vp := vote.ToProto()
+		// if err := pv.SignVote(cs.state.ChainID, vp); err != nil {
+		// 	return err
+		// }
+		vote.Signature = []byte{12}
+
+		cs.sendInternalMessage(msgInfo{Msg: &VoteMessage{vote}, PeerID: "", ReceiveTime: time.Time{}})
+	}
+	return nil
 }
 
 func (cs *State) voteTime(height int64) time.Time {
@@ -2590,9 +2641,9 @@ func (cs *State) signAddVote(
 	header types.PartSetHeader,
 	block *types.Block,
 ) {
-	if cs.privValidator == nil { // the node does not have a key
-		return
-	}
+	// if cs.privValidator == nil { // the node does not have a key
+	// 	return
+	// }
 
 	if cs.privValidatorPubKey == nil {
 		// Vote won't be signed, but it's not critical.
@@ -2606,41 +2657,42 @@ func (cs *State) signAddVote(
 	}
 
 	// TODO: pass pubKey to signVote
-	vote, err := cs.signVote(msgType, hash, header, block)
-	if err != nil {
-		cs.Logger.Error("Failed signing vote", "height", cs.Height, "round", cs.Round, "vote", vote, "err", err)
-		return
-	}
-	hasExt := len(vote.ExtensionSignature) > 0
-	extEnabled := cs.state.ConsensusParams.Feature.VoteExtensionsEnabled(vote.Height)
-	if vote.Type == types.PrecommitType && !vote.BlockID.IsNil() && hasExt != extEnabled {
-		panic(fmt.Errorf("vote extension absence/presence does not match extensions enabled %t!=%t, height %d, type %v",
-			hasExt, extEnabled, vote.Height, vote.Type))
-	}
-	cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, "", time.Time{}})
-	cs.Logger.Debug("Signed and pushed vote", "height", cs.Height, "round", cs.Round, "vote", vote)
+	cs.signVotesForAll(msgType, hash, header, block)
+	// vote, err := cs.signVote(msgType, hash, header, block)
+	// if err != nil {
+	// 	cs.Logger.Error("Failed signing vote", "height", cs.Height, "round", cs.Round, "vote", vote, "err", err)
+	// 	return
+	// }
+	// hasExt := len(vote.ExtensionSignature) > 0
+	// extEnabled := cs.state.ConsensusParams.Feature.VoteExtensionsEnabled(vote.Height)
+	// if vote.Type == types.PrecommitType && !vote.BlockID.IsNil() && hasExt != extEnabled {
+	// 	panic(fmt.Errorf("vote extension absence/presence does not match extensions enabled %t!=%t, height %d, type %v",
+	// 		hasExt, extEnabled, vote.Height, vote.Type))
+	// }
+	// cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, "", time.Time{}})
+	// cs.Logger.Debug("Signed and pushed vote", "height", cs.Height, "round", cs.Round, "vote", vote)
 }
 
 // updatePrivValidatorPubKey gets the private validator public key and
 // memoizes it. This func returns an error if the private validator is not
 // responding or responds with an error.
-func (cs *State) updatePrivValidatorPubKey() error {
-	if cs.privValidator == nil {
-		return nil
-	}
+// func (cs *State) updatePrivValidatorPubKey() error {
+// 	if cs.privValidator == nil {
+// 		return nil
+// 	}
 
-	pubKey, err := cs.privValidator.GetPubKey()
-	if err != nil {
-		return err
-	}
-	cs.privValidatorPubKey = pubKey
-	return nil
-}
+// 	pubKey, err := cs.privValidator.GetPubKey()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	cs.privValidatorPubKey = pubKey
+// 	return nil
+// }
 
 // look back to check existence of the node's consensus votes before joining consensus.
-func (cs *State) checkDoubleSigningRisk(height int64) error {
-	if cs.privValidator != nil && cs.privValidatorPubKey != nil && cs.config.DoubleSignCheckHeight > 0 && height > 0 {
-		valAddr := cs.privValidatorPubKey.Address()
+func (cs *State) checkDoubleSigningRisk(pubkey crypto.PubKey, height int64) error {
+	if pubkey != nil && cs.privValidatorPubKey != nil && cs.config.DoubleSignCheckHeight > 0 && height > 0 {
+		valAddr := pubkey.Address()
 		doubleSignCheckHeight := cs.config.DoubleSignCheckHeight
 		if doubleSignCheckHeight > height {
 			doubleSignCheckHeight = height

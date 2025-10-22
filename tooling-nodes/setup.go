@@ -1,58 +1,57 @@
-package node
+package tooling_nodes
 
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"time"
 
-	_ "net/http/pprof" //nolint: gosec,gci // securely exposed on separate, optional port
-
-	_ "github.com/lib/pq" //nolint: gci // provide the psql db driver.
+	_ "net/http/pprof" //nolint: gosec // securely exposed on separate, optional port
 
 	dbm "github.com/cometbft/cometbft-db"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 	cfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/crypto"
-	"github.com/cometbft/cometbft/crypto/tmhash"
 	"github.com/cometbft/cometbft/internal/blocksync"
 	cs "github.com/cometbft/cometbft/internal/consensus"
 	"github.com/cometbft/cometbft/internal/evidence"
+	"github.com/cometbft/cometbft/statesync"
+
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/light"
 	mempl "github.com/cometbft/cometbft/mempool"
 	"github.com/cometbft/cometbft/p2p"
 	"github.com/cometbft/cometbft/p2p/pex"
-	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
 	sm "github.com/cometbft/cometbft/state"
 	"github.com/cometbft/cometbft/state/indexer"
 	"github.com/cometbft/cometbft/state/indexer/block"
 	"github.com/cometbft/cometbft/state/txindex"
-	"github.com/cometbft/cometbft/statesync"
 	"github.com/cometbft/cometbft/store"
 	"github.com/cometbft/cometbft/types"
 	"github.com/cometbft/cometbft/version"
+
+	_ "github.com/lib/pq" // provide the psql db driver
 )
 
 const readHeaderTimeout = 10 * time.Second
 
-// ChecksummedGenesisDoc combines a GenesisDoc together with its
-// SHA256 checksum.
-type ChecksummedGenesisDoc struct {
-	GenesisDoc     *types.GenesisDoc
-	Sha256Checksum []byte
-}
+// GenesisDocProvider returns a GenesisDoc.
+// It allows the GenesisDoc to be pulled from sources other than the
+// filesystem, for instance from a distributed key-value store cluster.
+// type GenesisDocProvider func() (*types.GenesisDoc, error)
 
-// Introduced to store parameters passed via cli and needed to start the node.
-// This parameters should not be stored or persisted in the config file.
-// This can then be further extended to include additional flags without further
-// API breaking changes.
+// DefaultGenesisDocProviderFunc returns a GenesisDocProvider that loads
+// the GenesisDoc from the config.GenesisFile() on the filesystem.
+// func DefaultGenesisDocProviderFunc(config *cfg.Config) GenesisDocProvider {
+// 	return func() (*types.GenesisDoc, error) {
+// 		return types.GenesisDocFromFile(config.GenesisFile())
+// 	}
+// }
+
 type CliParams struct {
 	// SHA-256 hash of the genesis file provided via the command line.
 	// This hash is used is compared against the computed hash of the
@@ -62,102 +61,39 @@ type CliParams struct {
 	GenesisHash []byte
 }
 
-// GenesisDocProvider returns a GenesisDoc together with its SHA256 checksum.
-// It allows the GenesisDoc to be pulled from sources other than the
-// filesystem, for instance from a distributed key-value store cluster.
-// It is the responsibility of the GenesisDocProvider to ensure that the SHA256
-// checksum correctly matches the GenesisDoc, that is:
-// sha256(GenesisDoc) == Sha256Checksum.
-type GenesisDocProvider func() (ChecksummedGenesisDoc, error)
-
-// DefaultGenesisDocProviderFunc returns a GenesisDocProvider that loads
-// the GenesisDoc from the config.GenesisFile() on the filesystem.
-func DefaultGenesisDocProviderFunc(config *cfg.Config) GenesisDocProvider {
-	return func() (ChecksummedGenesisDoc, error) {
-		// FIXME: find a way to stream the file incrementally,
-		// for the JSON	parser and the checksum computation.
-		// https://github.com/cometbft/cometbft/issues/1302
-		jsonBlob, err := os.ReadFile(config.GenesisFile())
-		if err != nil {
-			return ChecksummedGenesisDoc{}, fmt.Errorf("couldn't read GenesisDoc file: %w", err)
-		}
-		incomingChecksum := tmhash.Sum(jsonBlob)
-		genDoc, err := types.GenesisDocFromJSON(jsonBlob)
-		if err != nil {
-			return ChecksummedGenesisDoc{}, err
-		}
-		return ChecksummedGenesisDoc{GenesisDoc: genDoc, Sha256Checksum: incomingChecksum}, nil
-	}
-}
-
 // Provider takes a config and a logger and returns a ready to go Node.
-type Provider func(*cfg.Config, log.Logger, CliParams, func() (crypto.PrivKey, error)) (*Node, error)
-
-// DefaultNewNode returns a CometBFT node with default settings for the
-// PrivValidator, ClientCreator, GenesisDoc, and DBProvider.
-// It implements Provider.
-func DefaultNewNode(
-	config *cfg.Config,
-	logger log.Logger,
-	cliParams CliParams,
-	keyGenF func() (crypto.PrivKey, error),
-) (*Node, error) {
-	nodeKey, err := p2p.LoadOrGenNodeKey(config.NodeKeyFile())
-	if err != nil {
-		return nil, fmt.Errorf("failed to load or gen node key %s: %w", config.NodeKeyFile(), err)
-	}
-
-	pv, err := privval.LoadOrGenFilePV(
-		config.PrivValidatorKeyFile(),
-		config.PrivValidatorStateFile(),
-		keyGenF,
-	)
-	if err != nil {
-		return nil, ErrorLoadOrGenFilePV{
-			Err:       err,
-			KeyFile:   config.PrivValidatorKeyFile(),
-			StateFile: config.PrivValidatorStateFile(),
-		}
-	}
-
-	return NewNodeWithCliParams(context.Background(), config,
-		pv,
-		nodeKey,
-		proxy.DefaultClientCreator(config.ProxyApp, config.ABCI, config.DBDir()),
-		DefaultGenesisDocProviderFunc(config),
-		cfg.DefaultDBProvider,
-		DefaultMetricsProvider(config.Instrumentation),
-		logger,
-		cliParams,
-	)
-}
+type Provider func(*cfg.Config, log.Logger) (*Node, error)
 
 // MetricsProvider returns a consensus, p2p and mempool Metrics.
-type MetricsProvider func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *store.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics)
+// type MetricsProvider func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics)
 
 // DefaultMetricsProvider returns Metrics build using Prometheus client library
 // if Prometheus is enabled. Otherwise, it returns no-op Metrics.
-func DefaultMetricsProvider(config *cfg.InstrumentationConfig) MetricsProvider {
-	return func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *store.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics) {
-		if config.Prometheus {
-			return cs.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				p2p.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				mempl.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				sm.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				store.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				proxy.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				blocksync.PrometheusMetrics(config.Namespace, "chain_id", chainID),
-				statesync.PrometheusMetrics(config.Namespace, "chain_id", chainID)
-		}
-		return cs.NopMetrics(), p2p.NopMetrics(), mempl.NopMetrics(), sm.NopMetrics(), store.NopMetrics(), proxy.NopMetrics(), blocksync.NopMetrics(), statesync.NopMetrics()
-	}
-}
+// func DefaultMetricsProvider(config *cfg.InstrumentationConfig) MetricsProvider {
+// 	return func(chainID string) (*cs.Metrics, *p2p.Metrics, *mempl.Metrics, *sm.Metrics, *proxy.Metrics, *blocksync.Metrics, *statesync.Metrics) {
+// 		if config.Prometheus {
+// 			return cs.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				p2p.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				mempl.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				sm.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				proxy.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				blocksync.PrometheusMetrics(config.Namespace, "chain_id", chainID),
+// 				statesync.PrometheusMetrics(config.Namespace, "chain_id", chainID)
+// 		}
+// 		return cs.NopMetrics(), p2p.NopMetrics(), mempl.NopMetrics(), sm.NopMetrics(), proxy.NopMetrics(), blocksync.NopMetrics(), statesync.NopMetrics()
+// 	}
+// }
 
 type blockSyncReactor interface {
-	SwitchToBlockSync(state sm.State) error
+	SwitchToBlockSync(sm.State) error
 }
 
-// ------------------------------------------------------------------------------
+var (
+	genesisDocKey     = []byte("genesisDoc")
+	genesisDocHashKey = []byte("genesisDocHash")
+)
+
+//------------------------------------------------------------------------------
 
 func initDBs(config *cfg.Config, dbProvider cfg.DBProvider) (bsDB dbm.DB, stateDB dbm.DB, err error) {
 	bsDB, err = dbProvider(&cfg.DBContext{ID: "blockstore", Config: config})
@@ -202,7 +138,6 @@ func createAndStartIndexerService(
 		txIndexer    txindex.TxIndexer
 		blockIndexer indexer.BlockIndexer
 	)
-
 	txIndexer, blockIndexer, allIndexersDisabled, err := block.IndexerFromConfig(config, dbProvider, chainID)
 	if err != nil {
 		return nil, nil, nil, err
@@ -213,9 +148,9 @@ func createAndStartIndexerService(
 
 	txIndexer.SetLogger(logger.With("module", "txindex"))
 	blockIndexer.SetLogger(logger.With("module", "txindex"))
-
 	indexerService := txindex.NewIndexerService(txIndexer, blockIndexer, eventBus, false)
 	indexerService.SetLogger(logger.With("module", "txindex"))
+
 	if err := indexerService.Start(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -270,12 +205,12 @@ func logNodeStartupInfo(state sm.State, pubKey crypto.PubKey, logger, consensusL
 	}
 }
 
-func onlyValidatorIsUs(state sm.State, localAddr crypto.Address) bool {
+func onlyValidatorIsUs(state sm.State, pubKey crypto.PubKey) bool {
 	if state.Validators.Size() > 1 {
 		return false
 	}
-	valAddr, _ := state.Validators.GetByIndex(0)
-	return bytes.Equal(localAddr, valAddr)
+	addr, _ := state.Validators.GetByIndex(0)
+	return bytes.Equal(pubKey.Address(), addr)
 }
 
 // createMempoolAndMempoolReactor creates a mempool and a mempool reactor based on the config.
@@ -287,7 +222,7 @@ func createMempoolAndMempoolReactor(
 	memplMetrics *mempl.Metrics,
 	logger log.Logger,
 	appInfoResponse *abci.InfoResponse,
-) (mempl.Mempool, waitSyncP2PReactor) {
+) (mempl.Mempool, p2p.Reactor) {
 	switch config.Mempool.Type {
 	// allow empty string for backward compatibility
 	case cfg.MempoolTypeFlood, "":
@@ -295,14 +230,12 @@ func createMempoolAndMempoolReactor(
 		if err != nil {
 			panic(fmt.Sprintf("could not get lanes info from app: %s", err))
 		}
-
 		logger = logger.With("module", "mempool")
 		mp := mempl.NewCListMempool(
 			config.Mempool,
 			proxyApp.Mempool(),
 			lanesInfo,
 			state.LastBlockHeight,
-			mempl.WithMetrics(memplMetrics),
 			mempl.WithPreCheck(sm.TxPreCheck(state)),
 			mempl.WithPostCheck(sm.TxPostCheck(state)),
 		)
@@ -335,7 +268,7 @@ func createEvidenceReactor(config *cfg.Config, dbProvider cfg.DBProvider,
 		return nil, nil, err
 	}
 	evidenceLogger := logger.With("module", "evidence")
-	evidencePool, err := evidence.NewPool(evidenceDB, stateStore, blockStore, evidence.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
+	evidencePool, err := evidence.NewPool(evidenceDB, stateStore, blockStore)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -374,6 +307,7 @@ func createConsensusReactor(config *cfg.Config,
 	mempool mempl.Mempool,
 	evidencePool *evidence.Pool,
 	pub crypto.PubKey,
+	listpub []crypto.PubKey,
 	csMetrics *cs.Metrics,
 	waitSync bool,
 	eventBus *types.EventBus,
@@ -393,6 +327,7 @@ func createConsensusReactor(config *cfg.Config,
 	consensusState.SetLogger(consensusLogger)
 	if pub != nil {
 		consensusState.SetPrivValidator(pub)
+		consensusState.SetListPrivValidator(listpub)
 	}
 	consensusReactor := cs.NewReactor(consensusState, waitSync, cs.ReactorMetrics(csMetrics))
 	consensusReactor.SetLogger(consensusLogger)
@@ -430,7 +365,7 @@ func createTransport(
 			// ABCI query for address filtering.
 			func(_ p2p.ConnSet, c net.Conn, _ []net.IP) error {
 				res, err := proxyApp.Query().Query(context.TODO(), &abci.QueryRequest{
-					Path: "/p2p/filter/addr/" + c.RemoteAddr().String(),
+					Path: fmt.Sprintf("/p2p/filter/addr/%s", c.RemoteAddr().String()),
 				})
 				if err != nil {
 					return err
@@ -563,7 +498,6 @@ func startStateSync(
 	stateStore sm.Store,
 	blockStore *store.BlockStore,
 	state sm.State,
-	dbKeyLayoutVersion string,
 ) error {
 	ssR.Logger.Info("Starting state sync")
 
@@ -571,15 +505,14 @@ func startStateSync(
 		var err error
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		stateProvider, err = statesync.NewLightClientStateProviderWithDBKeyVersion(
+		stateProvider, err = statesync.NewLightClientStateProvider(
 			ctx,
 			state.ChainID, state.Version, state.InitialHeight,
 			config.RPCServers, light.TrustOptions{
 				Period: config.TrustPeriod,
 				Height: config.TrustHeight,
 				Hash:   config.TrustHashBytes(),
-			}, ssR.Logger.With("module", "light"),
-			dbKeyLayoutVersion)
+			}, ssR.Logger.With("module", "light"))
 		if err != nil {
 			return fmt.Errorf("failed to set up light client state provider: %w", err)
 		}
@@ -611,120 +544,8 @@ func startStateSync(
 	return nil
 }
 
-// ------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 
-var (
-	genesisDocKey     = []byte("genesisDoc")
-	genesisDocHashKey = []byte("genesisDocHash")
-)
-
-func LoadStateFromDBOrGenesisDocProviderWithConfig(
-	stateDB dbm.DB,
-	genesisDocProvider GenesisDocProvider,
-	operatorGenesisHashHex string,
-	config *cfg.Config,
-) (sm.State, *types.GenesisDoc, error) {
-	// Get genesis doc hash
-	genDocHash, err := stateDB.Get(genesisDocHashKey)
-	if err != nil {
-		return sm.State{}, nil, fmt.Errorf("error retrieving genesis doc hash: %w", err)
-	}
-	csGenDoc, err := genesisDocProvider()
-	if err != nil {
-		return sm.State{}, nil, err
-	}
-
-	if err = csGenDoc.GenesisDoc.ValidateAndComplete(); err != nil {
-		return sm.State{}, nil, fmt.Errorf("error in genesis doc: %w", err)
-	}
-
-	// Validate that existing or recently saved genesis file hash matches optional --genesis_hash passed by operator
-	if operatorGenesisHashHex != "" {
-		decodedOperatorGenesisHash, err := hex.DecodeString(operatorGenesisHashHex)
-		if err != nil {
-			return sm.State{}, nil, errors.New("genesis hash provided by operator cannot be decoded")
-		}
-		if !bytes.Equal(csGenDoc.Sha256Checksum, decodedOperatorGenesisHash) {
-			return sm.State{}, nil, errors.New("genesis doc hash in db does not match passed --genesis_hash value")
-		}
-	}
-
-	if len(genDocHash) == 0 {
-		// Save the genDoc hash in the store if it doesn't already exist for future verification
-		if err = stateDB.SetSync(genesisDocHashKey, csGenDoc.Sha256Checksum); err != nil {
-			return sm.State{}, nil, fmt.Errorf("failed to save genesis doc hash to db: %w", err)
-		}
-	} else {
-		if !bytes.Equal(genDocHash, csGenDoc.Sha256Checksum) {
-			return sm.State{}, nil, errors.New("genesis doc hash in db does not match loaded genesis doc")
-		}
-	}
-
-	dbKeyLayoutVersion := ""
-	if config != nil {
-		dbKeyLayoutVersion = config.Storage.ExperimentalKeyLayout
-	}
-	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
-		DiscardABCIResponses: false,
-		DBKeyLayout:          dbKeyLayoutVersion,
-	})
-
-	state, err := stateStore.LoadFromDBOrGenesisDoc(csGenDoc.GenesisDoc)
-	if err != nil {
-		return sm.State{}, nil, err
-	}
-	return state, csGenDoc.GenesisDoc, nil
-}
-
-// LoadStateFromDBOrGenesisDocProvider attempts to load the state from the
-// database, or creates one using the given genesisDocProvider. On success this also
-// returns the genesis doc loaded through the given provider.
-
-// Note that if you don't have a version of the key layout set in your DB already,
-// and no config is passed, it will default to v1.
-func LoadStateFromDBOrGenesisDocProvider(
-	stateDB dbm.DB,
-	genesisDocProvider GenesisDocProvider,
-	operatorGenesisHashHex string,
-) (sm.State, *types.GenesisDoc, error) {
-	return LoadStateFromDBOrGenesisDocProviderWithConfig(stateDB, genesisDocProvider, operatorGenesisHashHex, nil)
-}
-
-func createAndStartPrivValidatorSocketClient(
-	listenAddr,
-	chainID string,
-	logger log.Logger,
-) (types.PrivValidator, error) {
-	pve, err := privval.NewSignerListener(listenAddr, logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start private validator: %w", err)
-	}
-
-	pvsc, err := privval.NewSignerClient(pve, chainID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start private validator: %w", err)
-	}
-
-	// try to get a pubkey from private validate first time
-	_, err = pvsc.GetPubKey()
-	if err != nil {
-		return nil, fmt.Errorf("can't get pubkey: %w", err)
-	}
-
-	const (
-		retries = 50 // 50 * 100ms = 5s total
-		timeout = 100 * time.Millisecond
-	)
-	pvscWithRetries := privval.NewRetrySignerClient(pvsc, retries, timeout)
-
-	return pvscWithRetries, nil
-}
-
-// splitAndTrimEmpty slices s into all subslices separated by sep and returns a
-// slice of the string s with all leading and trailing Unicode code points
-// contained in cutset removed. If sep is empty, SplitAndTrim splits after each
-// UTF-8 sequence. First part is equivalent to strings.SplitN with a count of
-// -1.  also filter out empty strings, only return non-empty strings.
 func splitAndTrimEmpty(s, sep, cutset string) []string {
 	if s == "" {
 		return []string{}
